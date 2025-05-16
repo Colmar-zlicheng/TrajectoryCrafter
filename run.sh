@@ -1,6 +1,5 @@
-# gradual mode
 python inference.py \
-    --video_path './test/videos/p7.mp4' \
+    --video_path './test/videos/smplx_0005_cam0.mp4' \
     --stride 2 \
     --out_dir experiments \
     --radius_scale 1 \
@@ -9,6 +8,18 @@ python inference.py \
     --mask \
     --target_pose 0 -30 0.3 0 0 \
     --traj_txt 'test/trajs/loop2.txt' \
+
+# # gradual mode
+# python inference.py \
+#     --video_path './test/videos/p7.mp4' \
+#     --stride 2 \
+#     --out_dir experiments \
+#     --radius_scale 1 \
+#     --camera 'target' \
+#     --mode 'gradual' \
+#     --mask \
+#     --target_pose 0 -30 0.3 0 0 \
+#     --traj_txt 'test/trajs/loop2.txt' \
 
 # # direct mode
 # python inference.py \

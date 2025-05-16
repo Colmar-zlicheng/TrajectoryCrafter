@@ -10,28 +10,18 @@ def get_parser():
 
     ## general
     parser.add_argument('--video_path', type=str, help='Input path')
-    parser.add_argument(
-        '--out_dir', type=str, default='./experiments/', help='Output dir'
-    )
-    parser.add_argument(
-        '--device', type=str, default='cuda:0', help='The device to use'
-    )
+    parser.add_argument('--out_dir', type=str, default='./experiments/', help='Output dir')
+    parser.add_argument('--device', type=str, default='cuda:0', help='The device to use')
     parser.add_argument(
         '--exp_name',
         type=str,
         default=None,
         help='Experiment name, use video file name by default',
     )
-    parser.add_argument(
-        '--seed', type=int, default=43, help='Random seed for reproducibility'
-    )
-    parser.add_argument(
-        '--video_length', type=int, default=49, help='Length of the video frames'
-    )
+    parser.add_argument('--seed', type=int, default=43, help='Random seed for reproducibility')
+    parser.add_argument('--video_length', type=int, default=49, help='Length of the video frames')
     parser.add_argument('--fps', type=int, default=10, help='Fps for saved video')
-    parser.add_argument(
-        '--stride', type=int, default=1, help='Sampling stride for input video'
-    )
+    parser.add_argument('--stride', type=int, default=1, help='Sampling stride for input video')
     parser.add_argument('--server_name', type=str, help='Server IP address')
 
     ## render
@@ -42,12 +32,8 @@ def get_parser():
         help='Scale factor for the spherical radius',
     )
     parser.add_argument('--camera', type=str, default='traj', help='traj or target')
-    parser.add_argument(
-        '--mode', type=str, default='gradual', help='gradual, bullet or direct'
-    )
-    parser.add_argument(
-        '--mask', action='store_true', default=False, help='Clean the pcd if true'
-    )
+    parser.add_argument('--mode', type=str, default='gradual', help='gradual, bullet or direct')
+    parser.add_argument('--mask', action='store_true', default=False, help='Clean the pcd if true')
     parser.add_argument(
         '--traj_txt',
         type=str,
@@ -59,12 +45,8 @@ def get_parser():
         type=float,
         help="Required for 'target' mode, specify target camera pose, <theta phi r x y>",
     )
-    parser.add_argument(
-        '--near', type=float, default=0.0001, help='Near clipping plane distance'
-    )
-    parser.add_argument(
-        '--far', type=float, default=10000.0, help='Far clipping plane distance'
-    )
+    parser.add_argument('--near', type=float, default=0.0001, help='Near clipping plane distance')
+    parser.add_argument('--far', type=float, default=10000.0, help='Far clipping plane distance')
     parser.add_argument('--anchor_idx', type=int, default=0, help='One GT frame')
 
     ## diffusion
@@ -114,19 +96,19 @@ def get_parser():
         default=50,
         help='Number of inference steps',
     )
-    parser.add_argument(
-        '--prompt', type=str, default=None, help='Prompt for video generation'
-    )
+    parser.add_argument('--prompt', type=str, default=None, help='Prompt for video generation')
     parser.add_argument(
         '--negative_prompt',
         type=str,
-        default="The video is not of a high quality, it has a low resolution. Watermark present in each frame. The background is solid. Strange body and strange trajectory. Distortion.",
+        default=
+        "The video is not of a high quality, it has a low resolution. Watermark present in each frame. The background is solid. Strange body and strange trajectory. Distortion.",
         help='Negative prompt for video generation',
     )
     parser.add_argument(
         '--refine_prompt',
         type=str,
-        default=". The video is of high quality, and the view is very clear. High quality, masterpiece, best quality, highres, ultra-detailed, fantastic.",
+        default=
+        ". The video is of high quality, and the view is very clear. High quality, masterpiece, best quality, highres, ultra-detailed, fantastic.",
         help='Prompt for video generation',
     )
     parser.add_argument('--blip_path', type=str, default="Salesforce/blip2-opt-2.7b")
@@ -147,27 +129,17 @@ def get_parser():
         default="stabilityai/stable-video-diffusion-img2vid-xt",
         help='Path to the pre-trained model',
     )
-    parser.add_argument(
-        '--cpu_offload', type=str, default='model', help='CPU offload strategy'
-    )
-    parser.add_argument(
-        '--depth_inference_steps', type=int, default=5, help='Number of inference steps'
-    )
+    parser.add_argument('--cpu_offload', type=str, default='model', help='CPU offload strategy')
+    parser.add_argument('--depth_inference_steps', type=int, default=5, help='Number of inference steps')
     parser.add_argument(
         '--depth_guidance_scale',
         type=float,
         default=1.0,
         help='Guidance scale for inference',
     )
-    parser.add_argument(
-        '--window_size', type=int, default=110, help='Window size for processing'
-    )
-    parser.add_argument(
-        '--overlap', type=int, default=25, help='Overlap size for processing'
-    )
-    parser.add_argument(
-        '--max_res', type=int, default=1024, help='Maximum resolution for processing'
-    )
+    parser.add_argument('--window_size', type=int, default=110, help='Window size for processing')
+    parser.add_argument('--overlap', type=int, default=25, help='Overlap size for processing')
+    parser.add_argument('--max_res', type=int, default=1024, help='Maximum resolution for processing')
 
     return parser
 
@@ -178,9 +150,7 @@ if __name__ == "__main__":
     opts.weight_dtype = torch.bfloat16
     if opts.exp_name == None:
         prefix = datetime.now().strftime("%Y%m%d_%H%M")
-        opts.exp_name = (
-            f'{prefix}_{os.path.splitext(os.path.basename(opts.video_path))[0]}'
-        )
+        opts.exp_name = (f'{prefix}_{os.path.splitext(os.path.basename(opts.video_path))[0]}')
     opts.save_dir = os.path.join(opts.out_dir, opts.exp_name)
     os.makedirs(opts.save_dir, exist_ok=True)
     pvd = TrajCrafter(opts)

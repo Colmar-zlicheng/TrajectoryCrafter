@@ -47,14 +47,10 @@ def read_video_frames(video_path, process_length, stride, max_res, dataset="open
     vid = VideoReader(video_path, ctx=cpu(0), width=width, height=height)
 
     frames_idx = list(range(0, len(vid), stride))
-    print(
-        f"==> downsampled shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}, with stride: {stride}"
-    )
+    print(f"==> downsampled shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}, with stride: {stride}")
     if process_length != -1 and process_length < len(frames_idx):
         frames_idx = frames_idx[:process_length]
-    print(
-        f"==> final processing shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}"
-    )
+    print(f"==> final processing shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}")
     frames = vid.get_batch(frames_idx).asnumpy().astype("float32") / 255.0
 
     return frames
@@ -67,15 +63,10 @@ def save_video(data, images_path, folder=None, fps=8):
         tensor_data = (data.detach().cpu() * 255).to(torch.uint8)
     elif isinstance(data, list):
         folder = [folder] * len(data)
-        images = [
-            np.array(Image.open(os.path.join(folder_name, path)))
-            for folder_name, path in zip(folder, data)
-        ]
+        images = [np.array(Image.open(os.path.join(folder_name, path))) for folder_name, path in zip(folder, data)]
         stacked_images = np.stack(images, axis=0)
         tensor_data = torch.from_numpy(stacked_images).to(torch.uint8)
-    torchvision.io.write_video(
-        images_path, tensor_data, fps=fps, video_codec='h264', options={'crf': '10'}
-    )
+    torchvision.io.write_video(images_path, tensor_data, fps=fps, video_codec='h264', options={'crf': '10'})
 
 
 def sphere2pose(c2ws_input, theta, phi, r, device, x=None, y=None):
@@ -92,36 +83,22 @@ def sphere2pose(c2ws_input, theta, phi, r, device, x=None, y=None):
     theta = torch.deg2rad(torch.tensor(theta)).to(device)
     sin_value_x = torch.sin(theta)
     cos_value_x = torch.cos(theta)
-    rot_mat_x = (
-        torch.tensor(
-            [
-                [1, 0, 0, 0],
-                [0, cos_value_x, -sin_value_x, 0],
-                [0, sin_value_x, cos_value_x, 0],
-                [0, 0, 0, 1],
-            ]
-        )
-        .unsqueeze(0)
-        .repeat(c2ws.shape[0], 1, 1)
-        .to(device)
-    )
+    rot_mat_x = (torch.tensor([
+        [1, 0, 0, 0],
+        [0, cos_value_x, -sin_value_x, 0],
+        [0, sin_value_x, cos_value_x, 0],
+        [0, 0, 0, 1],
+    ]).unsqueeze(0).repeat(c2ws.shape[0], 1, 1).to(device))
 
     phi = torch.deg2rad(torch.tensor(phi)).to(device)
     sin_value_y = torch.sin(phi)
     cos_value_y = torch.cos(phi)
-    rot_mat_y = (
-        torch.tensor(
-            [
-                [cos_value_y, 0, sin_value_y, 0],
-                [0, 1, 0, 0],
-                [-sin_value_y, 0, cos_value_y, 0],
-                [0, 0, 0, 1],
-            ]
-        )
-        .unsqueeze(0)
-        .repeat(c2ws.shape[0], 1, 1)
-        .to(device)
-    )
+    rot_mat_y = (torch.tensor([
+        [cos_value_y, 0, sin_value_y, 0],
+        [0, 1, 0, 0],
+        [-sin_value_y, 0, cos_value_y, 0],
+        [0, 0, 0, 1],
+    ]).unsqueeze(0).repeat(c2ws.shape[0], 1, 1).to(device))
 
     c2ws = torch.matmul(rot_mat_x, c2ws)
     c2ws = torch.matmul(rot_mat_y, c2ws)
@@ -196,15 +173,14 @@ def generate_traj_txt(c2ws_anchor, phi, theta, r, frame, device):
 
     c2ws_list = []
     for th, ph, r in zip(thetas, phis, rs):
-        c2w_new = sphere2pose(
-            c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device
-        )
+        c2w_new = sphere2pose(c2ws_anchor, np.float32(th), np.float32(ph), np.float32(r), device)
         c2ws_list.append(c2w_new)
     c2ws = torch.cat(c2ws_list, dim=0)
     return c2ws
 
 
 class Warper:
+
     def __init__(self, resolution: tuple = None, device: str = 'gpu0'):
         self.resolution = resolution
         self.device = self.get_device(device)
@@ -261,31 +237,22 @@ class Warper:
         intrinsic1 = intrinsic1.to(self.device).to(self.dtype)
         intrinsic2 = intrinsic2.to(self.device).to(self.dtype)
 
-        trans_points1 = self.compute_transformed_points(
-            depth1, transformation1, transformation2, intrinsic1, intrinsic2
-        )
-        trans_coordinates = (
-            trans_points1[:, :, :, :2, 0] / trans_points1[:, :, :, 2:3, 0]
-        )
+        trans_points1 = self.compute_transformed_points(depth1, transformation1, transformation2, intrinsic1,
+                                                        intrinsic2)
+        trans_coordinates = (trans_points1[:, :, :, :2, 0] / trans_points1[:, :, :, 2:3, 0])
         trans_depth1 = trans_points1[:, :, :, 2, 0]
         grid = self.create_grid(b, h, w).to(trans_coordinates)
         flow12 = trans_coordinates.permute(0, 3, 1, 2) - grid
         if not twice:
-            warped_frame2, mask2 = self.bilinear_splatting(
-                frame1, mask1, trans_depth1, flow12, None, is_image=True
-            )
+            warped_frame2, mask2 = self.bilinear_splatting(frame1, mask1, trans_depth1, flow12, None, is_image=True)
             if mask:
                 warped_frame2, mask2 = self.clean_points(warped_frame2, mask2)
             return warped_frame2, mask2, None, flow12
 
         else:
-            warped_frame2, mask2 = self.bilinear_splatting(
-                frame1, mask1, trans_depth1, flow12, None, is_image=True
-            )
+            warped_frame2, mask2 = self.bilinear_splatting(frame1, mask1, trans_depth1, flow12, None, is_image=True)
             # warped_frame2, mask2 = self.clean_points(warped_frame2, mask2)
-            warped_flow, _ = self.bilinear_splatting(
-                flow12, mask1, trans_depth1, flow12, None, is_image=False
-            )
+            warped_flow, _ = self.bilinear_splatting(flow12, mask1, trans_depth1, flow12, None, is_image=False)
             twice_warped_frame1, _ = self.bilinear_splatting(
                 warped_frame2,
                 mask2,
@@ -312,21 +279,15 @@ class Warper:
         b, _, h, w = depth1.shape
         if intrinsic2 is None:
             intrinsic2 = intrinsic1.clone()
-        transformation = torch.bmm(
-            transformation2, torch.linalg.inv(transformation1)
-        )  # (b, 4, 4)
+        transformation = torch.bmm(transformation2, torch.linalg.inv(transformation1))  # (b, 4, 4)
 
         x1d = torch.arange(0, w)[None]
         y1d = torch.arange(0, h)[:, None]
         x2d = x1d.repeat([h, 1]).to(depth1)  # (h, w)
         y2d = y1d.repeat([1, w]).to(depth1)  # (h, w)
         ones_2d = torch.ones(size=(h, w)).to(depth1)  # (h, w)
-        ones_4d = ones_2d[None, :, :, None, None].repeat(
-            [b, 1, 1, 1, 1]
-        )  # (b, h, w, 1, 1)
-        pos_vectors_homo = torch.stack([x2d, y2d, ones_2d], dim=2)[
-            None, :, :, :, None
-        ]  # (1, h, w, 3, 1)
+        ones_4d = ones_2d[None, :, :, None, None].repeat([b, 1, 1, 1, 1])  # (b, h, w, 1, 1)
+        pos_vectors_homo = torch.stack([x2d, y2d, ones_2d], dim=2)[None, :, :, :, None]  # (1, h, w, 3, 1)
 
         intrinsic1_inv = torch.linalg.inv(intrinsic1)  # (b, 3, 3)
         intrinsic1_inv_4d = intrinsic1_inv[:, None, None]  # (b, 1, 1, 3, 3)
@@ -334,9 +295,7 @@ class Warper:
         depth_4d = depth1[:, 0][:, :, :, None, None]  # (b, h, w, 1, 1)
         trans_4d = transformation[:, None, None]  # (b, 1, 1, 4, 4)
 
-        unnormalized_pos = torch.matmul(
-            intrinsic1_inv_4d, pos_vectors_homo
-        )  # (b, h, w, 3, 1)
+        unnormalized_pos = torch.matmul(intrinsic1_inv_4d, pos_vectors_homo)  # (b, h, w, 3, 1)
         world_points = depth_4d * unnormalized_pos  # (b, h, w, 3, 1)
         world_points_homo = torch.cat([world_points, ones_4d], dim=3)  # (b, h, w, 4, 1)
         trans_world_homo = torch.matmul(trans_4d, world_points_homo)  # (b, h, w, 4, 1)
@@ -400,17 +359,13 @@ class Warper:
         )
 
         prox_weight_nw = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * (
-            1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1])
-        )
+            1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1]))
         prox_weight_sw = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * (
-            1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1])
-        )
+            1 - (trans_pos_offset[:, 0:1] - trans_pos_floor[:, 0:1]))
         prox_weight_ne = (1 - (trans_pos_offset[:, 1:2] - trans_pos_floor[:, 1:2])) * (
-            1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1])
-        )
+            1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1]))
         prox_weight_se = (1 - (trans_pos_ceil[:, 1:2] - trans_pos_offset[:, 1:2])) * (
-            1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1])
-        )
+            1 - (trans_pos_ceil[:, 0:1] - trans_pos_offset[:, 0:1]))
 
         sat_depth1 = torch.clamp(depth1, min=0, max=1000)
         log_depth1 = torch.log(1 + sat_depth1)
@@ -437,12 +392,8 @@ class Warper:
             [0, 3, 1, 2],
         )
 
-        warped_frame = torch.zeros(size=(b, h + 2, w + 2, c), dtype=torch.float32).to(
-            frame1
-        )
-        warped_weights = torch.zeros(size=(b, h + 2, w + 2, 1), dtype=torch.float32).to(
-            frame1
-        )
+        warped_frame = torch.zeros(size=(b, h + 2, w + 2, c), dtype=torch.float32).to(frame1)
+        warped_weights = torch.zeros(size=(b, h + 2, w + 2, 1), dtype=torch.float32).to(frame1)
 
         frame1_cl = torch.moveaxis(frame1, [0, 1, 2, 3], [0, 3, 1, 2])
         batch_indices = torch.arange(b)[:, None, None].to(frame1.device)
@@ -496,9 +447,7 @@ class Warper:
         mask = cropped_weights > 0
         zero_value = -1 if is_image else 0
         zero_tensor = torch.tensor(zero_value, dtype=frame1.dtype, device=frame1.device)
-        warped_frame2 = torch.where(
-            mask, cropped_warped_frame / cropped_weights, zero_tensor
-        )
+        warped_frame2 = torch.where(mask, cropped_warped_frame / cropped_weights, zero_tensor)
         mask2 = mask.to(frame1)
 
         if is_image:
@@ -520,12 +469,7 @@ class Warper:
         mask_erosion_ = numpy.array(mask_erosion) / 255.0
         mask_erosion_[mask_erosion_ < 0.5] = 0
         mask_erosion_[mask_erosion_ >= 0.5] = 1
-        mask_new = (
-            torch.from_numpy(mask_erosion_)
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-            .to(self.device)
-        )
+        mask_new = (torch.from_numpy(mask_erosion_).permute(2, 0, 1).unsqueeze(0).to(self.device))
         warped_frame2 = warped_frame2 * (1 - mask_new)
         return warped_frame2 * 2.0 - 1.0, 1 - mask_new[:, 0:1, :, :]
 
@@ -558,9 +502,7 @@ class Warper:
         return depth
 
     @staticmethod
-    def camera_intrinsic_transform(
-        capture_width=1920, capture_height=1080, patch_start_point: tuple = (0, 0)
-    ):
+    def camera_intrinsic_transform(capture_width=1920, capture_height=1080, patch_start_point: tuple = (0, 0)):
         start_y, start_x = patch_start_point
         camera_intrinsics = numpy.eye(4)
         camera_intrinsics[0, 0] = 2100

@@ -35,7 +35,6 @@ from diffusers.image_processor import VaeImageProcessor
 from einops import rearrange
 from models.crosstransformer3d import CrossTransformer3DModel
 
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -91,30 +90,22 @@ def retrieve_timesteps(
         second element is the number of inference steps.
     """
     if timesteps is not None and sigmas is not None:
-        raise ValueError(
-            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
-        )
+        raise ValueError("Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values")
     if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys()
-        )
+        accepts_timesteps = "timesteps" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accepts_timesteps:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" timestep schedules. Please check whether you are using the correct scheduler."
-            )
+                f" timestep schedules. Please check whether you are using the correct scheduler.")
         scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
     elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys()
-        )
+        accept_sigmas = "sigmas" in set(inspect.signature(scheduler.set_timesteps).parameters.keys())
         if not accept_sigmas:
             raise ValueError(
                 f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" sigmas schedules. Please check whether you are using the correct scheduler."
-            )
+                f" sigmas schedules. Please check whether you are using the correct scheduler.")
         scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
         timesteps = scheduler.timesteps
         num_inference_steps = len(timesteps)
@@ -147,24 +138,18 @@ def resize_mask(mask, latent, process_first_frame_only=True):
                 mode='trilinear',
                 align_corners=False,
             )
-            resized_mask = torch.cat(
-                [first_frame_resized, remaining_frames_resized], dim=2
-            )
+            resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
         else:
             resized_mask = first_frame_resized
     else:
         target_size = list(latent_size[2:])
-        resized_mask = F.interpolate(
-            mask, size=target_size, mode='trilinear', align_corners=False
-        )
+        resized_mask = F.interpolate(mask, size=target_size, mode='trilinear', align_corners=False)
     return resized_mask
 
 
 def add_noise_to_reference_video(image, ratio=None):
     if ratio is None:
-        sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(
-            image.device
-        )
+        sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(image.device)
         sigma = torch.exp(sigma).to(image.dtype)
     else:
         sigma = torch.ones((image.shape[0],)).to(image.device, image.dtype) * ratio
@@ -218,22 +203,14 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
             transformer=transformer,
             scheduler=scheduler,
         )
-        self.vae_scale_factor_spatial = (
-            2 ** (len(self.vae.config.block_out_channels) - 1)
-            if hasattr(self, "vae") and self.vae is not None
-            else 8
-        )
-        self.vae_scale_factor_temporal = (
-            self.vae.config.temporal_compression_ratio
-            if hasattr(self, "vae") and self.vae is not None
-            else 4
-        )
+        self.vae_scale_factor_spatial = (2**(len(self.vae.config.block_out_channels) -
+                                             1) if hasattr(self, "vae") and self.vae is not None else 8)
+        self.vae_scale_factor_temporal = (self.vae.config.temporal_compression_ratio
+                                          if hasattr(self, "vae") and self.vae is not None else 4)
 
-        self.video_processor = VideoProcessor(
-            vae_scale_factor=self.vae_scale_factor_spatial
-        )
+        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+        self.vae_scale_factor = 2**(len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.mask_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor,
@@ -265,20 +242,12 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
             return_tensors="pt",
         )
         text_input_ids = text_inputs.input_ids
-        untruncated_ids = self.tokenizer(
-            prompt, padding="longest", return_tensors="pt"
-        ).input_ids
+        untruncated_ids = self.tokenizer(prompt, padding="longest", return_tensors="pt").input_ids
 
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
-            text_input_ids, untruncated_ids
-        ):
-            removed_text = self.tokenizer.batch_decode(
-                untruncated_ids[:, max_sequence_length - 1 : -1]
-            )
-            logger.warning(
-                "The following part of your input was truncated because `max_sequence_length` is set to "
-                f" {max_sequence_length} tokens: {removed_text}"
-            )
+        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
+            removed_text = self.tokenizer.batch_decode(untruncated_ids[:, max_sequence_length - 1:-1])
+            logger.warning("The following part of your input was truncated because `max_sequence_length` is set to "
+                           f" {max_sequence_length} tokens: {removed_text}")
 
         prompt_embeds = self.text_encoder(text_input_ids.to(device))[0]
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
@@ -286,9 +255,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         # duplicate text embeddings for each generation per prompt, using mps friendly method
         _, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(
-            batch_size * num_videos_per_prompt, seq_len, -1
-        )
+        prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, seq_len, -1)
 
         return prompt_embeds
 
@@ -349,23 +316,17 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             negative_prompt = negative_prompt or ""
-            negative_prompt = (
-                batch_size * [negative_prompt]
-                if isinstance(negative_prompt, str)
-                else negative_prompt
-            )
+            negative_prompt = (batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt)
 
             if prompt is not None and type(prompt) is not type(negative_prompt):
                 raise TypeError(
                     f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    f" {type(prompt)}."
-                )
+                    f" {type(prompt)}.")
             elif batch_size != len(negative_prompt):
                 raise ValueError(
                     f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
                     f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
+                    " the batch size of `prompt`.")
 
             negative_prompt_embeds = self._get_t5_prompt_embeds(
                 prompt=negative_prompt,
@@ -404,8 +365,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators.")
 
         if return_video_latents or (latents is None and not is_strength_max):
             video = video.to(device=device, dtype=self.vae.dtype)
@@ -413,7 +373,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
             bs = 1
             new_video = []
             for i in range(0, video.shape[0], bs):
-                video_bs = video[i : i + bs]
+                video_bs = video[i:i + bs]
                 video_bs = self.vae.encode(video_bs)[0]
                 video_bs = video_bs.sample()
                 new_video.append(video_bs)
@@ -427,17 +387,9 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         if latents is None:  # this branch
             noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
             # if strength is 1. then initialise the latents to noise, else initial to image + noise
-            latents = (
-                noise
-                if is_strength_max
-                else self.scheduler.add_noise(video_latents, noise, timestep)
-            )
+            latents = (noise if is_strength_max else self.scheduler.add_noise(video_latents, noise, timestep))
             # if pure noise then scale the initial latents by the  Scheduler's init sigma
-            latents = (
-                latents * self.scheduler.init_noise_sigma
-                if is_strength_max
-                else latents
-            )
+            latents = (latents * self.scheduler.init_noise_sigma if is_strength_max else latents)
         else:
             noise = latents.to(device)
             latents = noise * self.scheduler.init_noise_sigma
@@ -475,7 +427,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
             bs = 1
             new_mask = []
             for i in range(0, mask.shape[0], bs):
-                mask_bs = mask[i : i + bs]
+                mask_bs = mask[i:i + bs]
                 mask_bs = self.vae.encode(mask_bs)[0]
                 mask_bs = mask_bs.mode()
                 new_mask.append(mask_bs)
@@ -484,14 +436,12 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
         if masked_image is not None:
             if self.transformer.config.add_noise_in_inpaint_model:
-                masked_image = add_noise_to_reference_video(
-                    masked_image, ratio=noise_aug_strength
-                )
+                masked_image = add_noise_to_reference_video(masked_image, ratio=noise_aug_strength)
             masked_image = masked_image.to(device=device, dtype=self.vae.dtype)
             bs = 1
             new_mask_pixel_values = []
             for i in range(0, masked_image.shape[0], bs):
-                mask_pixel_values_bs = masked_image[i : i + bs]
+                mask_pixel_values_bs = masked_image[i:i + bs]
                 mask_pixel_values_bs = self.vae.encode(mask_pixel_values_bs)[0]
                 mask_pixel_values_bs = mask_pixel_values_bs.mode()
                 new_mask_pixel_values.append(mask_pixel_values_bs)
@@ -503,9 +453,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         return mask, masked_image_latents
 
     def decode_latents(self, latents: torch.Tensor) -> torch.Tensor:
-        latents = latents.permute(
-            0, 2, 1, 3, 4
-        )  # [batch_size, num_channels, num_frames, height, width]
+        latents = latents.permute(0, 2, 1, 3, 4)  # [batch_size, num_channels, num_frames, height, width]
         latents = 1 / self.vae.config.scaling_factor * latents
 
         frames = self.vae.decode(latents).sample
@@ -521,17 +469,13 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
-        accepts_eta = "eta" in set(
-            inspect.signature(self.scheduler.step).parameters.keys()
-        )
+        accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
         extra_step_kwargs = {}
         if accepts_eta:
             extra_step_kwargs["eta"] = eta
 
         # check if the scheduler accepts generator
-        accepts_generator = "generator" in set(
-            inspect.signature(self.scheduler.step).parameters.keys()
-        )
+        accepts_generator = "generator" in set(inspect.signature(self.scheduler.step).parameters.keys())
         if accepts_generator:
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
@@ -548,52 +492,37 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         negative_prompt_embeds=None,
     ):
         if height % 8 != 0 or width % 8 != 0:
-            raise ValueError(
-                f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
-            )
+            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if callback_on_step_end_tensor_inputs is not None and not all(
-            k in self._callback_tensor_inputs
-            for k in callback_on_step_end_tensor_inputs
-        ):
+        if callback_on_step_end_tensor_inputs is not None and not all(k in self._callback_tensor_inputs
+                                                                      for k in callback_on_step_end_tensor_inputs):
             raise ValueError(
                 f"`callback_on_step_end_tensor_inputs` has to be in {self._callback_tensor_inputs}, but found {[k for k in callback_on_step_end_tensor_inputs if k not in self._callback_tensor_inputs]}"
             )
         if prompt is not None and prompt_embeds is not None:
             raise ValueError(
                 f"Cannot forward both `prompt`: {prompt} and `prompt_embeds`: {prompt_embeds}. Please make sure to"
-                " only forward one of the two."
-            )
+                " only forward one of the two.")
         elif prompt is None and prompt_embeds is None:
             raise ValueError(
-                "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined."
-            )
-        elif prompt is not None and (
-            not isinstance(prompt, str) and not isinstance(prompt, list)
-        ):
-            raise ValueError(
-                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
-            )
+                "Provide either `prompt` or `prompt_embeds`. Cannot leave both `prompt` and `prompt_embeds` undefined.")
+        elif prompt is not None and (not isinstance(prompt, str) and not isinstance(prompt, list)):
+            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
 
         if prompt is not None and negative_prompt_embeds is not None:
-            raise ValueError(
-                f"Cannot forward both `prompt`: {prompt} and `negative_prompt_embeds`:"
-                f" {negative_prompt_embeds}. Please make sure to only forward one of the two."
-            )
+            raise ValueError(f"Cannot forward both `prompt`: {prompt} and `negative_prompt_embeds`:"
+                             f" {negative_prompt_embeds}. Please make sure to only forward one of the two.")
 
         if negative_prompt is not None and negative_prompt_embeds is not None:
-            raise ValueError(
-                f"Cannot forward both `negative_prompt`: {negative_prompt} and `negative_prompt_embeds`:"
-                f" {negative_prompt_embeds}. Please make sure to only forward one of the two."
-            )
+            raise ValueError(f"Cannot forward both `negative_prompt`: {negative_prompt} and `negative_prompt_embeds`:"
+                             f" {negative_prompt_embeds}. Please make sure to only forward one of the two.")
 
         if prompt_embeds is not None and negative_prompt_embeds is not None:
             if prompt_embeds.shape != negative_prompt_embeds.shape:
                 raise ValueError(
                     "`prompt_embeds` and `negative_prompt_embeds` must have the same shape when passed directly, but"
                     f" got: `prompt_embeds` {prompt_embeds.shape} != `negative_prompt_embeds`"
-                    f" {negative_prompt_embeds.shape}."
-                )
+                    f" {negative_prompt_embeds.shape}.")
 
     def fuse_qkv_projections(self) -> None:
         r"""Enables fused QKV projections."""
@@ -603,9 +532,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
     def unfuse_qkv_projections(self) -> None:
         r"""Disable QKV projection fusion if enabled."""
         if not self.fusing_transformer:
-            logger.warning(
-                "The Transformer was not initially fused for QKV projections. Doing nothing."
-            )
+            logger.warning("The Transformer was not initially fused for QKV projections. Doing nothing.")
         else:
             self.transformer.unfuse_qkv_projections()
             self.fusing_transformer = False
@@ -617,22 +544,13 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         num_frames: int,
         device: torch.device,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        grid_height = height // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
-        )
-        grid_width = width // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
-        )
-        base_size_width = 720 // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
-        )
-        base_size_height = 480 // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
-        )
+        grid_height = height // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
+        grid_width = width // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
+        base_size_width = 720 // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
+        base_size_height = 480 // (self.vae_scale_factor_spatial * self.transformer.config.patch_size)
 
-        grid_crops_coords = get_resize_crop_region_for_grid(
-            (grid_height, grid_width), base_size_width, base_size_height
-        )
+        grid_crops_coords = get_resize_crop_region_for_grid((grid_height, grid_width), base_size_width,
+                                                            base_size_height)
         freqs_cos, freqs_sin = get_3d_rotary_pos_embed(
             embed_dim=self.transformer.config.attention_head_dim,
             crops_coords=grid_crops_coords,
@@ -663,7 +581,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         init_timestep = min(int(num_inference_steps * strength), num_inference_steps)
 
         t_start = max(num_inference_steps - init_timestep, 0)
-        timesteps = self.scheduler.timesteps[t_start * self.scheduler.order :]
+        timesteps = self.scheduler.timesteps[t_start * self.scheduler.order:]
 
         return timesteps, num_inference_steps - t_start
 
@@ -691,13 +609,11 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
         output_type: str = "numpy",
         return_dict: bool = False,
-        callback_on_step_end: Optional[
-            Union[
-                Callable[[int, int, Dict], None],
-                PipelineCallback,
-                MultiPipelineCallbacks,
-            ]
-        ] = None,
+        callback_on_step_end: Optional[Union[
+            Callable[[int, int, Dict], None],
+            PipelineCallback,
+            MultiPipelineCallbacks,
+        ]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 226,
         strength: float = 1,
@@ -788,13 +704,8 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         if isinstance(callback_on_step_end, (PipelineCallback, MultiPipelineCallbacks)):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
-        height = (
-            height
-            or self.transformer.config.sample_size * self.vae_scale_factor_spatial
-        )
-        width = (
-            width or self.transformer.config.sample_size * self.vae_scale_factor_spatial
-        )
+        height = (height or self.transformer.config.sample_size * self.vae_scale_factor_spatial)
+        width = (width or self.transformer.config.sample_size * self.vae_scale_factor_spatial)
         num_videos_per_prompt = 1
 
         # 1. Check inputs. Raise error if not correct
@@ -841,9 +752,9 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
         # 4. set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
-        timesteps, num_inference_steps = self.get_timesteps(
-            num_inference_steps=num_inference_steps, strength=strength, device=device
-        )
+        timesteps, num_inference_steps = self.get_timesteps(num_inference_steps=num_inference_steps,
+                                                            strength=strength,
+                                                            device=device)
         self._num_timesteps = len(timesteps)
         if comfyui_progressbar:
             from comfy.utils import ProgressBar
@@ -857,39 +768,33 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         # 5. Prepare latents.
         if video is not None:
             video_length = video.shape[2]
-            init_video = self.image_processor.preprocess(
-                rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width
-            )
+            init_video = self.image_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"),
+                                                         height=height,
+                                                         width=width)
             init_video = init_video.to(dtype=torch.float32)
-            init_video = rearrange(
-                init_video, "(b f) c h w -> b c f h w", f=video_length
-            )
+            init_video = rearrange(init_video, "(b f) c h w -> b c f h w", f=video_length)
         else:
             init_video = None
 
         ref_length = reference.shape[2]
-        ref_video = self.image_processor.preprocess(
-            rearrange(reference, "b c f h w -> (b f) c h w"), height=height, width=width
-        )
+        ref_video = self.image_processor.preprocess(rearrange(reference, "b c f h w -> (b f) c h w"),
+                                                    height=height,
+                                                    width=width)
         ref_video = rearrange(ref_video, "(b f) c h w -> b c f h w", f=ref_length)
         bs = 1
         ref_video = ref_video.to(device=device, dtype=self.vae.dtype)
         new_ref_video = []
         for i in range(0, ref_video.shape[0], bs):
-            video_bs = ref_video[i : i + bs]
+            video_bs = ref_video[i:i + bs]
             video_bs = self.vae.encode(video_bs)[0]
             video_bs = video_bs.sample()
             new_ref_video.append(video_bs)
         new_ref_video = torch.cat(new_ref_video, dim=0)
         new_ref_video = new_ref_video * self.vae.config.scaling_factor
-        ref_latents = new_ref_video.repeat(
-            batch_size // new_ref_video.shape[0], 1, 1, 1, 1
-        )
+        ref_latents = new_ref_video.repeat(batch_size // new_ref_video.shape[0], 1, 1, 1, 1)
         ref_latents = ref_latents.to(device=self.device, dtype=self.dtype)
         ref_latents = rearrange(ref_latents, "b c f h w -> b f c h w")
-        ref_input = (
-            torch.cat([ref_latents] * 2) if do_classifier_free_guidance else ref_latents
-        )
+        ref_input = (torch.cat([ref_latents] * 2) if do_classifier_free_guidance else ref_latents)
 
         num_channels_latents = self.vae.config.latent_channels
         num_channels_transformer = self.transformer.config.in_channels
@@ -920,26 +825,13 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         # [1, 3, 49, 384, 672] to [1, 13, 16, 48, 84]
         if mask_video is not None:
             if (mask_video == 255).all():
-                mask_latents = torch.zeros_like(latents)[:, :, :1].to(
-                    latents.device, latents.dtype
-                )
-                masked_video_latents = torch.zeros_like(latents).to(
-                    latents.device, latents.dtype
-                )
+                mask_latents = torch.zeros_like(latents)[:, :, :1].to(latents.device, latents.dtype)
+                masked_video_latents = torch.zeros_like(latents).to(latents.device, latents.dtype)
 
-                mask_input = (
-                    torch.cat([mask_latents] * 2)
-                    if do_classifier_free_guidance
-                    else mask_latents
-                )
-                masked_video_latents_input = (
-                    torch.cat([masked_video_latents] * 2)
-                    if do_classifier_free_guidance
-                    else masked_video_latents
-                )
-                inpaint_latents = torch.cat(
-                    [mask_input, masked_video_latents_input], dim=2
-                ).to(latents.dtype)
+                mask_input = (torch.cat([mask_latents] * 2) if do_classifier_free_guidance else mask_latents)
+                masked_video_latents_input = (torch.cat([masked_video_latents] *
+                                                        2) if do_classifier_free_guidance else masked_video_latents)
+                inpaint_latents = torch.cat([mask_input, masked_video_latents_input], dim=2).to(latents.dtype)
             else:
                 # Prepare mask latent variables
                 video_length = video.shape[2]
@@ -949,20 +841,14 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
                     width=width,
                 )
                 mask_condition = mask_condition.to(dtype=torch.float32)
-                mask_condition = rearrange(
-                    mask_condition, "(b f) c h w -> b c f h w", f=video_length
-                )
+                mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
                 # [0,1]
                 if num_channels_transformer != num_channels_latents:
                     mask_condition_tile = torch.tile(mask_condition, [1, 3, 1, 1, 1])
                     if masked_video_latents is None:
                         # 在 mask_condition_tile 小于 0.5(即0,首帧) 的位置，masked_video 保留 init_video 的值；在 mask_condition_tile 大于 0.5（即1） 的位置，masked_video 的值被设置为 -1
-                        masked_video = (
-                            init_video * (mask_condition_tile < 0.5)
-                            + torch.ones_like(init_video)
-                            * (mask_condition_tile > 0.5)
-                            * -1
-                        )
+                        masked_video = (init_video * (mask_condition_tile < 0.5) + torch.ones_like(init_video) *
+                                        (mask_condition_tile > 0.5) * -1)
                     else:
                         masked_video = masked_video_latents
 
@@ -981,14 +867,9 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
                     # mask at latent size, 1 is valid,第一帧变成1,后面变成0
                     mask_latents = resize_mask(1 - mask_condition, masked_video_latents)
                     # 缩放1的数值
-                    mask_latents = (
-                        mask_latents.to(masked_video_latents.device)
-                        * self.vae.config.scaling_factor
-                    )
+                    mask_latents = (mask_latents.to(masked_video_latents.device) * self.vae.config.scaling_factor)
 
-                    mask = torch.tile(
-                        mask_condition, [1, num_channels_latents, 1, 1, 1]
-                    )
+                    mask = torch.tile(mask_condition, [1, num_channels_latents, 1, 1, 1])
                     mask = F.interpolate(
                         mask,
                         size=latents.size()[-3:],
@@ -997,30 +878,17 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
                     ).to(latents.device, latents.dtype)
 
                     # input is with cfg guidance
-                    mask_input = (
-                        torch.cat([mask_latents] * 2)
-                        if do_classifier_free_guidance
-                        else mask_latents
-                    )
-                    masked_video_latents_input = (
-                        torch.cat([masked_video_latents] * 2)
-                        if do_classifier_free_guidance
-                        else masked_video_latents
-                    )
+                    mask_input = (torch.cat([mask_latents] * 2) if do_classifier_free_guidance else mask_latents)
+                    masked_video_latents_input = (torch.cat([masked_video_latents] *
+                                                            2) if do_classifier_free_guidance else masked_video_latents)
 
                     mask = rearrange(mask, "b c f h w -> b f c h w")
                     mask_input = rearrange(mask_input, "b c f h w -> b f c h w")
-                    masked_video_latents_input = rearrange(
-                        masked_video_latents_input, "b c f h w -> b f c h w"
-                    )
+                    masked_video_latents_input = rearrange(masked_video_latents_input, "b c f h w -> b f c h w")
                     # channel cat
-                    inpaint_latents = torch.cat(
-                        [mask_input, masked_video_latents_input], dim=2
-                    ).to(latents.dtype)
+                    inpaint_latents = torch.cat([mask_input, masked_video_latents_input], dim=2).to(latents.dtype)
                 else:
-                    mask = torch.tile(
-                        mask_condition, [1, num_channels_latents, 1, 1, 1]
-                    )
+                    mask = torch.tile(mask_condition, [1, num_channels_latents, 1, 1, 1])
                     mask = F.interpolate(
                         mask,
                         size=latents.size()[-3:],
@@ -1033,27 +901,17 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         else:
             if num_channels_transformer != num_channels_latents:
                 mask = torch.zeros_like(latents).to(latents.device, latents.dtype)
-                masked_video_latents = torch.zeros_like(latents).to(
-                    latents.device, latents.dtype
-                )
+                masked_video_latents = torch.zeros_like(latents).to(latents.device, latents.dtype)
 
-                mask_input = (
-                    torch.cat([mask] * 2) if do_classifier_free_guidance else mask
-                )
-                masked_video_latents_input = (
-                    torch.cat([masked_video_latents] * 2)
-                    if do_classifier_free_guidance
-                    else masked_video_latents
-                )
-                inpaint_latents = torch.cat(
-                    [mask_input, masked_video_latents_input], dim=1
-                ).to(latents.dtype)
+                mask_input = (torch.cat([mask] * 2) if do_classifier_free_guidance else mask)
+                masked_video_latents_input = (torch.cat([masked_video_latents] *
+                                                        2) if do_classifier_free_guidance else masked_video_latents)
+                inpaint_latents = torch.cat([mask_input, masked_video_latents_input], dim=1).to(latents.dtype)
             else:
                 mask = torch.zeros_like(init_video[:, :1])
                 mask = torch.tile(mask, [1, num_channels_latents, 1, 1, 1])
-                mask = F.interpolate(
-                    mask, size=latents.size()[-3:], mode='trilinear', align_corners=True
-                ).to(latents.device, latents.dtype)
+                mask = F.interpolate(mask, size=latents.size()[-3:], mode='trilinear',
+                                     align_corners=True).to(latents.device, latents.dtype)
                 mask = rearrange(mask, "b c f h w -> b f c h w")
 
                 inpaint_latents = None
@@ -1065,17 +923,11 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
         # 7. Create rotary embeds if required
         image_rotary_emb = (
-            self._prepare_rotary_positional_embeddings(
-                height, width, latents.size(1), device
-            )  # h w t
-            if self.transformer.config.use_rotary_positional_embeddings
-            else None
-        )
+            self._prepare_rotary_positional_embeddings(height, width, latents.size(1), device)  # h w t
+            if self.transformer.config.use_rotary_positional_embeddings else None)
 
         # 8. Denoising loop
-        num_warmup_steps = max(
-            len(timesteps) - num_inference_steps * self.scheduler.order, 0
-        )
+        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # for DPM-solver++
@@ -1084,12 +936,8 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
                 if self.interrupt:
                     continue
 
-                latent_model_input = (
-                    torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-                )
-                latent_model_input = self.scheduler.scale_model_input(
-                    latent_model_input, t
-                )
+                latent_model_input = (torch.cat([latents] * 2) if do_classifier_free_guidance else latents)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
@@ -1109,31 +957,15 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
                 # perform guidance
                 if use_dynamic_cfg:
-                    self._guidance_scale = 1 + guidance_scale * (
-                        (
-                            1
-                            - math.cos(
-                                math.pi
-                                * (
-                                    (num_inference_steps - t.item())
-                                    / num_inference_steps
-                                )
-                                ** 5.0
-                            )
-                        )
-                        / 2
-                    )
+                    self._guidance_scale = 1 + guidance_scale * ((1 - math.cos(math.pi * (
+                        (num_inference_steps - t.item()) / num_inference_steps)**5.0)) / 2)
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (
-                        noise_pred_text - noise_pred_uncond
-                    )
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 if not isinstance(self.scheduler, CogVideoXDPMScheduler):
-                    latents = self.scheduler.step(
-                        noise_pred, t, latents, **extra_step_kwargs, return_dict=False
-                    )[0]
+                    latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
                 else:
                     latents, old_pred_original_sample = self.scheduler.step(
                         noise_pred,
@@ -1155,13 +987,9 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
 
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-                    negative_prompt_embeds = callback_outputs.pop(
-                        "negative_prompt_embeds", negative_prompt_embeds
-                    )
+                    negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
 
-                if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
-                ):
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
                 if comfyui_progressbar:
                     pbar.update(1)
@@ -1170,9 +998,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
             video = self.decode_latents(latents)
         elif not output_type == "latent":
             video = self.decode_latents(latents)
-            video = self.video_processor.postprocess_video(
-                video=video, output_type=output_type
-            )
+            video = self.video_processor.postprocess_video(video=video, output_type=output_type)
         else:
             video = latents
 

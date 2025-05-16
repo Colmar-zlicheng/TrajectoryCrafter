@@ -9,7 +9,6 @@ from inference import get_parser
 from datetime import datetime
 import argparse
 
-
 # 解析命令行参数
 
 traj_examples = [
@@ -43,17 +42,13 @@ CAMERA_MOTION_MODE = ["Basic Camera Trajectory", "Custom Camera Trajectory"]
 
 def show_traj(mode):
     if mode == 'Orbit Left':
-        return gr.update(value='0; -30; 0; 0; 0', visible=True), gr.update(
-            visible=False
-        )
+        return gr.update(value='0; -30; 0; 0; 0', visible=True), gr.update(visible=False)
     elif mode == 'Orbit Right':
         return gr.update(value='0; 30; 0; 0; 0', visible=True), gr.update(visible=False)
     elif mode == 'Orbit Up':
         return gr.update(value='30; 0; 0; 0; 0', visible=True), gr.update(visible=False)
     elif mode == 'Orbit Down':
-        return gr.update(value='-20; 0; 0; 0; 0', visible=True), gr.update(
-            visible=False
-        )
+        return gr.update(value='-20; 0; 0; 0; 0', visible=True), gr.update(visible=False)
     if mode == 'Pan Left':
         return gr.update(value='0; 0; 0; -2; 0', visible=True), gr.update(visible=False)
     elif mode == 'Pan Right':
@@ -63,13 +58,9 @@ def show_traj(mode):
     elif mode == 'Pan Down':
         return gr.update(value='0; 0; 0; 0; -2', visible=True), gr.update(visible=False)
     elif mode == 'Zoom in':
-        return gr.update(value='0; 0; 0.5; 0; 0', visible=True), gr.update(
-            visible=False
-        )
+        return gr.update(value='0; 0; 0.5; 0; 0', visible=True), gr.update(visible=False)
     elif mode == 'Zoom out':
-        return gr.update(value='0; 0; -0.5; 0; 0', visible=True), gr.update(
-            visible=False
-        )
+        return gr.update(value='0; 0; -0.5; 0; 0', visible=True), gr.update(visible=False)
     elif mode == 'Customize':
         return gr.update(value='0; 0; 0; 0; 0', visible=True), gr.update(visible=True)
     elif mode == 'Reset':
@@ -96,8 +87,7 @@ def trajcrafter_demo(opts):
     image2video = TrajCrafter(opts, gradio=True)
     # image2video.run_both = spaces.GPU(image2video.run_both, duration=290) # fixme
     with gr.Blocks(analytics_enabled=False, css=css) as trajcrafter_iface:
-        gr.Markdown(
-            """
+        gr.Markdown("""
             <div align='center'>
                 <h1>TrajectoryCrafter: Redirecting View Trajectory for Monocular Videos via Diffusion Models</h1>
                 <a style='font-size:18px;color: #FF5DB0' href='https://github.com/TrajectoryCrafter/TrajectoryCrafter'>[Github]</a>
@@ -105,17 +95,14 @@ def trajcrafter_demo(opts):
                 <a style='font-size:18px;color: #000000' href='https://trajectorycrafter.github.io/'>[Project Page]</a>
                 <a style='font-size:18px;color: #000000' href='https://www.youtube.com/watch?v=dQtHFgyrids'>[Video]</a>
             </div>
-        """
-        )
+        """)
 
         with gr.Row(equal_height=True):
             with gr.Column():
                 # # step 1: input an image
                 # gr.Markdown("---\n## Step 1: Input an Image, selet an elevation angle and a center_scale factor", show_label=False, visible=True)
                 # gr.Markdown("<div align='left' style='font-size:18px;color: #000000'>1. Estimate an elevation angle  that represents the angle at which the image was taken; a value bigger than 0 indicates a top-down view, and it doesn't need to be precise. <br>2. The origin of the world coordinate system is by default defined at the point cloud corresponding to the center pixel of the input image. You can adjust the position of the origin by modifying center_scale; a value smaller than 1 brings the origin closer to you.</div>")
-                i2v_input_video = gr.Video(
-                    label="Input Video", elem_id="input_video", format="mp4"
-                )
+                i2v_input_video = gr.Video(label="Input Video", elem_id="input_video", format="mp4")
 
             with gr.Column():
                 i2v_output_video = gr.Video(
@@ -151,9 +138,7 @@ def trajcrafter_demo(opts):
                     label="Sampling steps",
                     value=50,
                 )
-                i2v_seed = gr.Slider(
-                    label='Random seed', minimum=0, maximum=max_seed, step=1, value=43
-                )
+                i2v_seed = gr.Slider(label='Random seed', minimum=0, maximum=max_seed, step=1, value=43)
             with gr.Row():
                 pan_left = gr.Button(value="Pan Left")
                 pan_right = gr.Button(value="Pan Right")
@@ -277,9 +262,7 @@ def trajcrafter_demo(opts):
         pan_up.click(inputs=[pan_up], outputs=[i2v_pose, i2v_egs], fn=show_traj)
         pan_down.click(inputs=[pan_down], outputs=[i2v_pose, i2v_egs], fn=show_traj)
         orbit_left.click(inputs=[orbit_left], outputs=[i2v_pose, i2v_egs], fn=show_traj)
-        orbit_right.click(
-            inputs=[orbit_right], outputs=[i2v_pose, i2v_egs], fn=show_traj
-        )
+        orbit_right.click(inputs=[orbit_right], outputs=[i2v_pose, i2v_egs], fn=show_traj)
         orbit_up.click(inputs=[orbit_up], outputs=[i2v_pose, i2v_egs], fn=show_traj)
         orbit_down.click(inputs=[orbit_down], outputs=[i2v_pose, i2v_egs], fn=show_traj)
         zin.click(inputs=[zin], outputs=[i2v_pose, i2v_egs], fn=show_traj)
@@ -306,6 +289,4 @@ def trajcrafter_demo(opts):
 trajcrafter_iface = trajcrafter_demo(opts)
 trajcrafter_iface.queue(max_size=10)
 # trajcrafter_iface.launch(server_name=args.server_name, max_threads=10, debug=True)
-trajcrafter_iface.launch(
-    server_name="0.0.0.0", server_port=12345, debug=True, share=False, max_threads=10
-)
+trajcrafter_iface.launch(server_name="0.0.0.0", server_port=12345, debug=True, share=False, max_threads=10)

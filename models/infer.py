@@ -9,7 +9,9 @@ from diffusers.training_utils import set_seed
 from DepthCrafter.depthcrafter.depth_crafter_ppl import DepthCrafterPipeline
 from DepthCrafter.depthcrafter.unet import DiffusersUNetSpatioTemporalConditionModelDepthCrafter
 
+
 class DepthCrafterDemo:
+
     def __init__(
         self,
         unet_path: str,
