@@ -54,13 +54,17 @@ class TrajCrafter:
         else:
             assert frames.shape[0] == opts.video_length
 
+        assert use_vggt
+
         if use_vggt:
             import roma
             from models.vggt import inference_vggt
             from vggt.utils.pose_enc import pose_encoding_to_extri_intri
             assert opts.images_path is not None
             assert opts.camera_path is not None
-            ori_h = ori_w = 1280  # TODO:
+            # TODO:
+            ori_h = ori_w = 1280
+            resize = False
 
             vggt_predictions = inference_vggt(opts.images_path)
             vggt_depth = vggt_predictions['depth'].squeeze().detach().cpu().numpy()  # [N, 518, 518]
@@ -71,16 +75,21 @@ class TrajCrafter:
             depths = []
             K = []
             for i in range(vggt_depth.shape[0]):
-                depths.append(torch.from_numpy(cv2.resize(vggt_depth[i], (1024, 576), interpolation=cv2.INTER_NEAREST)))
                 intrin = vggt_intrinsic[i].clone()
+                if resize:
+                    depths.append(
+                        torch.from_numpy(cv2.resize(vggt_depth[i], (1024, 576), interpolation=cv2.INTER_NEAREST)))
 
-                s_x = 1024 / 518
-                s_y = 576 / 518
+                    s_x = 1024 / 518
+                    s_y = 576 / 518
 
-                intrin[0, 0] *= s_x  # fx
-                intrin[1, 1] *= s_y  # fy
-                intrin[0, 2] *= s_x  # cx
-                intrin[1, 2] *= s_y  # cy
+                    intrin[0, 0] *= s_x  # fx
+                    intrin[1, 1] *= s_y  # fy
+                    intrin[0, 2] *= s_x  # cx
+                    intrin[1, 2] *= s_y  # cy
+                else:
+                    depths.append(torch.from_numpy(vggt_depth[i]))
+                    frames = vggt_predictions['images'].squeeze(0)[:opts.video_length] * 2 - 1
 
                 K.append(intrin)
 
@@ -139,40 +148,35 @@ class TrajCrafter:
             # pose_s = scale * (R_trans @ source_cam) + t_trans
             # pose_t = scale * (R_trans @ target_cam) + t_trans
 
-            pose_source = torch.eye(4).unsqueeze(0).repeat(opts.video_length, 1, 1)
-            pose_source[:, :3, :3] = R.unsqueeze(0) @ source_cam[:, :3, :3]
-            pose_source[:, :3, 3] = (scale * R @ source_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
-            # pose_s = pose_source[0]
-            # pose_s = pose_s.unsqueeze(0).repeat(opts.video_length, 1, 1)
-            pose_s = pose_source.clone()
+            pose_s = torch.eye(4).unsqueeze(0).repeat(opts.video_length, 1, 1)
+            pose_s[:, :3, :3] = R.unsqueeze(0) @ source_cam[:, :3, :3]
+            pose_s[:, :3, 3] = (scale * R @ source_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
 
             pose_t = torch.eye(4).unsqueeze(0).repeat(opts.video_length, 1, 1)
             pose_t[:, :3, :3] = R.unsqueeze(0) @ target_cam[:, :3, :3]
             pose_t[:, :3, 3] = (scale * R @ target_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
 
             # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pose_source[:, :3, 3].numpy())
+            # pcd.points = o3d.utility.Vector3dVector(pose_s[:, :3, 3].numpy())
             # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_source.ply"), pcd)
+            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_s.ply"), pcd)
             # pcd = o3d.geometry.PointCloud()
             # pcd.points = o3d.utility.Vector3dVector(pose_t[:, :3, 3].numpy())
             # pcd.colors = o3d.utility.Vector3dVector(colors)
             # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_t.ply"), pcd)
             # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(torch.cat([pose_source[:, :3, 3], pose_t[:, :3, 3]], dim=0).numpy())
+            # pcd.points = o3d.utility.Vector3dVector(torch.cat([pose_s[:, :3, 3], pose_t[:, :3, 3]], dim=0).numpy())
             # pcd.colors = o3d.utility.Vector3dVector(np.concatenate([colors, colors], axis=0))
             # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_s_t.ply"), pcd)
 
             pose_s = torch.linalg.inv(pose_s)
             pose_t = torch.linalg.inv(pose_t)
 
-            # vggt_extrinsic = torch.cat(
-            #     [vggt_extrinsic, torch.tensor([[[0, 0, 0, 1]]]).repeat(opts.video_length, 1, 1)], dim=1)
-            # error = torch.mean(torch.linalg.norm(pose_source[:, :3, 3] - vggt_extrinsic[:, :3, 3], axis=1))
-            # print(torch.linalg.inv(pose_source) @ vggt_extrinsic)
+            # error = torch.mean(torch.linalg.norm(pose_s[:, :3, 3] - vggt_extrinsic[:, :3, 3], axis=1))
+            # print(torch.linalg.inv(pose_s) @ vggt_extrinsic)
             # print(error)
             # print(torch.mean(torch.linalg.norm(vggt_extrinsic[:, :3, 3], axis=1)))
-            # print(torch.mean(torch.linalg.norm(pose_source[:, :3, 3], axis=1)))
+            # print(torch.mean(torch.linalg.norm(pose_s[:, :3, 3], axis=1)))
             # exit()
         else:
             depths = self.depth_estimater.infer(
