@@ -697,7 +697,7 @@ class TrajCrafter_Pipeline(DiffusionPipeline):
         """
 
         if num_frames > 49:
-            raise ValueError(
+            logger.warning(
                 "The number of frames must be less than 49 for now due to static positional embeddings. This will be updated in the future to remove this limitation."
             )
 

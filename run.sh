@@ -1,10 +1,14 @@
-python inference.py \
-    --video_path './test/videos/smplx_0005_cam0.mp4' \
-    --stride 2 \
+CUDA_VISIBLE_DEVICES=0 python inference.py \
+    --video_path './data/test_data/scene15/videos/cam03.mp4' \
+    --images_path './data/test_data/scene15/images/cam03' \
+    --camera_path './data/test_data/scene15/cameras/cameras.json' \
+    --target_camera 'cam01' \
+    --stride 1 \
+    --video_length 49 \
     --out_dir experiments \
     --radius_scale 1 \
     --camera 'target' \
-    --mode 'gradual' \
+    --mode 'custom' \
     --mask \
     --target_pose 0 -30 0.3 0 0 \
     --traj_txt 'test/trajs/loop2.txt' \

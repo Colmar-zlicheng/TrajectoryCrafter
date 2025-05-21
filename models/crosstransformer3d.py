@@ -451,8 +451,10 @@ class CrossTransformer3DModel(ModelMixin, ConfigMixin):
             post_time_compression_frames,
             spatial_interpolation_scale,
             temporal_interpolation_scale,
+            output_type="pt",
         )
-        spatial_pos_embedding = torch.from_numpy(spatial_pos_embedding).flatten(0, 1)
+        # spatial_pos_embedding = torch.from_numpy(spatial_pos_embedding).flatten(0, 1)
+        spatial_pos_embedding = spatial_pos_embedding.flatten(0, 1)
         pos_embedding = torch.zeros(1, max_text_seq_length + self.num_patches, inner_dim, requires_grad=False)
         pos_embedding.data[:, max_text_seq_length:].copy_(spatial_pos_embedding)
         self.register_buffer("pos_embedding", pos_embedding, persistent=False)

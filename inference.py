@@ -10,6 +10,9 @@ def get_parser():
 
     ## general
     parser.add_argument('--video_path', type=str, help='Input path')
+    parser.add_argument('--images_path', type=str, default=None)
+    parser.add_argument('--camera_path', type=str, default=None)
+    parser.add_argument('--target_camera', type=str, default=None)
     parser.add_argument('--out_dir', type=str, default='./experiments/', help='Output dir')
     parser.add_argument('--device', type=str, default='cuda:0', help='The device to use')
     parser.add_argument(
@@ -162,3 +165,5 @@ if __name__ == "__main__":
         pvd.infer_bullet(opts)
     elif opts.mode == 'zoom':
         pvd.infer_zoom(opts)
+    elif opts.mode == 'custom':
+        pvd.infer_custom(opts)

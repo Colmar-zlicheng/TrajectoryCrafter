@@ -53,7 +53,7 @@ def read_video_frames(video_path, process_length, stride, max_res, dataset="open
     print(f"==> final processing shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}")
     frames = vid.get_batch(frames_idx).asnumpy().astype("float32") / 255.0
 
-    return frames
+    return frames  # (49, 576, 1024, 3)
 
 
 def save_video(data, images_path, folder=None, fps=8):
