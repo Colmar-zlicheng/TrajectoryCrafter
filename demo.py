@@ -74,6 +74,8 @@ class TrajCrafter:
 
             depths = []
             K = []
+            if not resize:
+                frames = vggt_predictions['images'].squeeze(0)[:opts.video_length] * 2 - 1
             for i in range(vggt_depth.shape[0]):
                 intrin = vggt_intrinsic[i].clone()
                 if resize:
@@ -89,7 +91,6 @@ class TrajCrafter:
                     intrin[1, 2] *= s_y  # cy
                 else:
                     depths.append(torch.from_numpy(vggt_depth[i]))
-                    frames = vggt_predictions['images'].squeeze(0)[:opts.video_length] * 2 - 1
 
                 K.append(intrin)
 

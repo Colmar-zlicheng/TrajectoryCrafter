@@ -2,7 +2,7 @@ CUDA_VISIBLE_DEVICES=1 python inference.py \
     --video_path './data/test_data/scene15/videos/cam03.mp4' \
     --images_path './data/test_data/scene15/images/cam03' \
     --camera_path './data/test_data/scene15/cameras/cameras.json' \
-    --target_camera 'cam01' \
+    --target_camera 'cam05' \
     --stride 1 \
     --video_length 49 \
     --out_dir experiments \
