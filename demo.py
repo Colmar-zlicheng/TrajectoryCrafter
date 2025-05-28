@@ -6,7 +6,7 @@ import torch
 from models.infer import DepthCrafterDemo
 import numpy as np
 import torch
-import json
+import pickle
 import h5py
 from transformers import T5EncoderModel
 from omegaconf import OmegaConf
@@ -183,9 +183,26 @@ class TrajCrafter:
         )  # (N, H, W, 3)
         num_frames, ori_h, ori_w = frames_ori.shape[:3]
         frames_ori = (torch.from_numpy(frames_ori).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
-                     )  # [N, H, W, 3] -> [N, 3, H, W], [-1,1]
+                     )  # [N, H, W, 3] -> [N, 3, H, W], [-1, 1]
 
-        # self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
+        frames_proj = frames_ori.clone()
+
+        static_cam = driod_camera['static'][0]
+        with open(os.path.join(opts.droid_path, "extract/camera", f"{static_cam}_intr.json"), 'r') as f:
+            static_intr = json.load(f)
+        K = torch.tensor(static_intr["left"]).unsqueeze(0).repeat(num_frames, 1, 1).to(opts.device)
+        with open(os.path.join(opts.droid_path, "extract/depth", f"{static_cam}_left.pkl"), 'rb') as f:
+            depths = pickle.load(f)
+        depths = torch.tensor(depths).to(opts.device).unsqueeze(1)
+        with open(os.path.join(opts.droid_path, "extract/camera", f"{static_cam}_extr_left.json"), 'r') as f:
+            static_extr = json.load(f)
+        with open(os.path.join(opts.droid_path, "extract/camera", f"{driod_camera['wrist']}_extr_left.json"), 'r') as f:
+            wrist_extr = json.load(f)
+
+        pose_s = torch.linalg.inv(torch.tensor(static_extr[:num_frames]).to(opts.device))
+        pose_t = torch.linalg.inv(torch.tensor(wrist_extr[:num_frames]).to(opts.device))
+
+        self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
 
     def infer_custom(self, opts):
         assert opts.images_path is not None
@@ -272,7 +289,7 @@ class TrajCrafter:
         pose_t[:, :3, :3] = R.unsqueeze(0) @ target_cam[:, :3, :3]
         pose_t[:, :3, 3] = (scale * R @ target_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
 
-        pose_s = torch.linalg.inv(pose_s)
+        pose_s = torch.linalg.inv(pose_s)  # w2c
         pose_t = torch.linalg.inv(pose_t)
 
         self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
