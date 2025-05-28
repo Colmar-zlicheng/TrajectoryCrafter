@@ -1,17 +1,22 @@
-CUDA_VISIBLE_DEVICES=1 python inference.py \
+CUDA_VISIBLE_DEVICES=0 python inference.py \
     --video_path './data/test_data/scene15/videos/cam03.mp4' \
     --images_path './data/test_data/scene15/images/cam03' \
     --camera_path './data/test_data/scene15/cameras/cameras.json' \
-    --target_camera 'cam05' \
+    --target_camera 'cam01' \
     --stride 1 \
-    --video_length 49 \
+    --video_length -1 \
     --out_dir experiments \
-    --radius_scale 1 \
-    --camera 'target' \
-    --mode 'custom' \
     --mask \
-    --target_pose 0 -30 0.3 0 0 \
-    --traj_txt 'test/trajs/loop2.txt' \
+    --mode 'custom' \
+
+# CUDA_VISIBLE_DEVICES=2 python inference.py \
+#     --droid_path './data/test_data/Fri_Jul__7_09:42:23_2023' \
+#     --driod_camera '{"static": [22008760, 24400334], "wrist": 18026681}'\
+#     --stride 1 \
+#     --video_length -1 \
+#     --out_dir experiments \
+#     --mask \
+#     --mode 'droid' \
 
 # # gradual mode
 # python inference.py \

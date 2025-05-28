@@ -1,12 +1,16 @@
 import gc
 import os
+import cv2
+import json
 import torch
 from models.infer import DepthCrafterDemo
 import numpy as np
 import torch
 import json
+import h5py
 from transformers import T5EncoderModel
 from omegaconf import OmegaConf
+import roma
 from PIL import Image
 from models.crosstransformer3d import CrossTransformer3DModel
 from models.autoencoder_magvit import AutoencoderKLCogVideoX
@@ -22,6 +26,7 @@ from diffusers import (
     PNDMScheduler,
 )
 from transformers import AutoProcessor, Blip2ForConditionalGeneration
+from models.vggt import inference_vggt, pose_encoding_to_extri_intri
 
 
 class TrajCrafter:
@@ -42,164 +47,24 @@ class TrajCrafter:
         if gradio:
             self.opts = opts
 
-    def infer_custom(self, opts, use_vggt=True):
-        frames = read_video_frames(opts.video_path, opts.video_length, opts.stride, opts.max_res)  # (N, 576, 1024, 3)
-        prompt = self.get_caption(opts, frames[opts.video_length // 2])
-
-        frames = (torch.from_numpy(frames).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
-                 )  # [N, 576, 1024, 3] -> [N, 3, 576, 1024], [-1,1]
-
-        if opts.video_length == -1:
-            opts.video_length = frames.shape[0]
-        else:
-            assert frames.shape[0] == opts.video_length
-
-        assert use_vggt
-
-        if use_vggt:
-            import roma
-            from models.vggt import inference_vggt
-            from vggt.utils.pose_enc import pose_encoding_to_extri_intri
-            assert opts.images_path is not None
-            assert opts.camera_path is not None
-            # TODO:
-            ori_h = ori_w = 1280
-            resize = False
-
-            vggt_predictions = inference_vggt(opts.images_path)
-            vggt_depth = vggt_predictions['depth'].squeeze().detach().cpu().numpy()  # [N, 518, 518]
-
-            vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], (576, 1024))
-            vggt_intrinsic = vggt_intrinsic.squeeze(0).detach().cpu()  # [N*, 3, 3]
-
-            depths = []
-            K = []
-            if not resize:
-                frames = vggt_predictions['images'].squeeze(0)[:opts.video_length] * 2 - 1
-            for i in range(vggt_depth.shape[0]):
-                intrin = vggt_intrinsic[i].clone()
-                if resize:
-                    depths.append(
-                        torch.from_numpy(cv2.resize(vggt_depth[i], (1024, 576), interpolation=cv2.INTER_NEAREST)))
-
-                    s_x = 1024 / 518
-                    s_y = 576 / 518
-
-                    intrin[0, 0] *= s_x  # fx
-                    intrin[1, 1] *= s_y  # fy
-                    intrin[0, 2] *= s_x  # cx
-                    intrin[1, 2] *= s_y  # cy
-                else:
-                    depths.append(torch.from_numpy(vggt_depth[i]))
-
-                K.append(intrin)
-
-            depths = torch.stack(depths).to(opts.device).unsqueeze(1)[:opts.video_length]
-            K = torch.stack(K).to(opts.device)[:opts.video_length]
-
-            with open(opts.camera_path, 'r') as f:
-                cam_data = json.load(f)
-
-            source_cam = torch.tensor(cam_data[opts.images_path.split('/')[-1]], dtype=torch.float32)
-            target_cam = torch.tensor(cam_data[opts.target_camera], dtype=torch.float32)
-
-            vggt_extrinsic = vggt_extrinsic.squeeze(0).detach().cpu()[:opts.video_length]  # [N, 3, 4], w2c
-            vggt_extrinsic = torch.cat(
-                [vggt_extrinsic, torch.tensor([[[0, 0, 0, 1]]]).repeat(opts.video_length, 1, 1)], dim=1)  # [N, 4, 4]
-            vggt_extrinsic = torch.linalg.inv(vggt_extrinsic)
-            source_cam = source_cam[:opts.video_length]  # [N, 4, 4]
-            target_cam = target_cam[:opts.video_length]  # [N, 4, 4]
-
-            # `\sum_i w_i \|s R x_i + t - y_i\|^2`
-            # s R x + t = y
-            R, t, scale = roma.rigid_points_registration(
-                x=source_cam[:, :3, 3],
-                y=vggt_extrinsic[:, :3, 3],
-                weights=None,
-                compute_scaling=True,
-            )
-            # import open3d as o3d
-            # colors = np.zeros((49, 3))
-            # normalized_indices = np.arange(49) / (49 - 1)
-            # colors[:, 0] = normalized_indices
-            # colors[:, 2] = 1 - normalized_indices
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(source_cam[:, :3, 3].numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "source_cam.ply"), pcd)
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(vggt_extrinsic[:, :3, 3].numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "vggt_extrinsic.ply"), pcd)
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(target_cam[:, :3, 3].numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "target_cam.ply"), pcd)
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(
-            #     torch.cat([source_cam[:, :3, 3], target_cam[:, :3, 3]], dim=0).numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(np.concatenate([colors, colors], axis=0))
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "source_target_cam.ply"), pcd)
-
-            R_trans = torch.eye(4)
-            R_trans[:3, :3] = R
-            t_trans = torch.zeros(4)
-            t_trans[:3] = t
-
-            # pose_s = scale * (R_trans @ source_cam) + t_trans
-            # pose_t = scale * (R_trans @ target_cam) + t_trans
-
-            pose_s = torch.eye(4).unsqueeze(0).repeat(opts.video_length, 1, 1)
-            pose_s[:, :3, :3] = R.unsqueeze(0) @ source_cam[:, :3, :3]
-            pose_s[:, :3, 3] = (scale * R @ source_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
-
-            pose_t = torch.eye(4).unsqueeze(0).repeat(opts.video_length, 1, 1)
-            pose_t[:, :3, :3] = R.unsqueeze(0) @ target_cam[:, :3, :3]
-            pose_t[:, :3, 3] = (scale * R @ target_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
-
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pose_s[:, :3, 3].numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_s.ply"), pcd)
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pose_t[:, :3, 3].numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_t.ply"), pcd)
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(torch.cat([pose_s[:, :3, 3], pose_t[:, :3, 3]], dim=0).numpy())
-            # pcd.colors = o3d.utility.Vector3dVector(np.concatenate([colors, colors], axis=0))
-            # o3d.io.write_point_cloud(os.path.join(opts.save_dir, "pose_s_t.ply"), pcd)
-
-            pose_s = torch.linalg.inv(pose_s)
-            pose_t = torch.linalg.inv(pose_t)
-
-            # error = torch.mean(torch.linalg.norm(pose_s[:, :3, 3] - vggt_extrinsic[:, :3, 3], axis=1))
-            # print(torch.linalg.inv(pose_s) @ vggt_extrinsic)
-            # print(error)
-            # print(torch.mean(torch.linalg.norm(vggt_extrinsic[:, :3, 3], axis=1)))
-            # print(torch.mean(torch.linalg.norm(pose_s[:, :3, 3], axis=1)))
-            # exit()
-        else:
-            depths = self.depth_estimater.infer(
-                frames,
-                opts.near,
-                opts.far,
-                opts.depth_inference_steps,
-                opts.depth_guidance_scale,
-                window_size=opts.window_size,
-                overlap=opts.overlap,
-            ).to(opts.device)  # [N, 1, 576, 1024]
-
-            pose_s, pose_t, K = self.get_poses(opts, depths, num_frames=opts.video_length)
-            # print(pose_s.shape) # [N，4, 4]
-            # print(pose_t.shape) # [N 4, 4]
-            # print(K.shape) # [N，3, 3]
+    def infer_diff_inpaint(self,
+                           opts,
+                           frames_ori,
+                           frames_proj,
+                           depths,
+                           pose_s,
+                           pose_t,
+                           K,
+                           ori_h,
+                           ori_w,
+                           max_frame_chunk=49):
+        num_frames = frames_ori.shape[0]
 
         warped_images = []
         masks = []
-        for i in tqdm(range(opts.video_length)):
+        for i in tqdm(range(num_frames)):
             warped_frame2, mask2, warped_depth2, flow12 = self.funwarp.forward_warp(
-                frames[i:i + 1],
+                frames_proj[i:i + 1],
                 None,
                 depths[i:i + 1],
                 pose_s[i:i + 1],
@@ -214,7 +79,7 @@ class TrajCrafter:
         cond_video = (torch.cat(warped_images) + 1.0) / 2.0
         cond_masks = torch.cat(masks)
 
-        frames = F.interpolate(frames, size=opts.sample_size, mode='bilinear', align_corners=False)
+        frames = F.interpolate(frames_ori, size=opts.sample_size, mode='bilinear', align_corners=False)
         cond_video = F.interpolate(cond_video, size=opts.sample_size, mode='bilinear', align_corners=False)
         cond_masks = F.interpolate(cond_masks, size=opts.sample_size, mode='nearest')
         save_video(
@@ -234,58 +99,183 @@ class TrajCrafter:
         )
 
         frames = (frames.permute(1, 0, 2, 3).unsqueeze(0) + 1.0) / 2.0
-        frames_ref = frames[:, :, :10, :, :]
         cond_video = cond_video.permute(1, 0, 2, 3).unsqueeze(0)
         cond_masks = (1.0 - cond_masks.permute(1, 0, 2, 3).unsqueeze(0)) * 255.0
-        generator = torch.Generator(device=opts.device).manual_seed(opts.seed)
+
+        frame_chunks = torch.split(frames, max_frame_chunk, dim=2)
+        cond_video_chunks = torch.split(cond_video, max_frame_chunk, dim=2)
+        cond_masks_chunks = torch.split(cond_masks, max_frame_chunk, dim=2)
+        prompt_chunks = []
+        frames_ref_chunks = []
+        for i in range(len(frame_chunks)):
+            frames_ref_chunks.append(frame_chunks[i][:, :, :10, :, :])
+            prompt = self.get_caption(
+                opts, frame_chunks[i][:, :, frame_chunks[i].shape[2] // 2].squeeze(0).permute(1, 2,
+                                                                                              0).detach().cpu().numpy())
+            prompt_chunks.append(prompt)
 
         del self.depth_estimater
         del self.caption_processor
         del self.captioner
-        gc.collect()
-        torch.cuda.empty_cache()
-        with torch.no_grad():
-            sample = self.pipeline(
-                prompt,
-                num_frames=opts.video_length,
-                negative_prompt=opts.negative_prompt,
-                height=opts.sample_size[0],
-                width=opts.sample_size[1],
-                generator=generator,
-                guidance_scale=opts.diffusion_guidance_scale,
-                num_inference_steps=opts.diffusion_inference_steps,
-                video=cond_video,
-                mask_video=cond_masks,
-                reference=frames_ref,
-            ).videos
+
+        results = []
+        generator = torch.Generator(device=opts.device).manual_seed(opts.seed)
+        for i in range(len(frame_chunks)):
+
+            print(f"PROCESSING CHUNK: {i+1}/{len(frame_chunks)}")
+
+            if i == 0:
+                reference = frames_ref_chunks[i]  # [1, 3, 10, H, W]
+            else:
+                reference = torch.cat([sample[0][:, -10:, :, :].unsqueeze(0).to(opts.device), frames_ref_chunks[i]],
+                                      dim=2)
+
+            gc.collect()
+            torch.cuda.empty_cache()
+            with torch.no_grad():
+                sample = self.pipeline(
+                    prompt_chunks[i],
+                    num_frames=frame_chunks[i].shape[2],
+                    negative_prompt=opts.negative_prompt,
+                    height=opts.sample_size[0],
+                    width=opts.sample_size[1],
+                    generator=generator,
+                    guidance_scale=opts.diffusion_guidance_scale,
+                    num_inference_steps=opts.diffusion_inference_steps,
+                    video=cond_video_chunks[i],
+                    mask_video=cond_masks_chunks[i],
+                    reference=reference,
+                ).videos
+            # sample[0] [C, N, H, W]
+            # save_video(
+            #     sample[0].permute(1, 2, 3, 0),
+            #     os.path.join(opts.save_dir, 'gen.mp4'),
+            #     fps=opts.fps,
+            # )
+            resized_batch = F.interpolate(sample[0].permute(1, 0, 2, 3),
+                                          size=(ori_h, ori_w),
+                                          mode='bilinear',
+                                          align_corners=False)
+            resized_batch = resized_batch.permute(0, 2, 3, 1).detach().cpu()
+            results.append(resized_batch)
+            save_video(
+                resized_batch,
+                os.path.join(opts.save_dir, f'gen_rs_{i:02}.mp4'),
+                fps=opts.fps,
+            )
+
+        results = torch.cat(results, dim=0)
         save_video(
-            sample[0].permute(1, 2, 3, 0),
-            os.path.join(opts.save_dir, 'gen.mp4'),
-            fps=opts.fps,
-        )
-        resized_batch = F.interpolate(sample[0].permute(1, 0, 2, 3),
-                                      size=(ori_h, ori_w),
-                                      mode='bilinear',
-                                      align_corners=False)
-        save_video(
-            resized_batch.permute(0, 2, 3, 1),
-            os.path.join(opts.save_dir, 'gen_rs.mp4'),
+            results,
+            os.path.join(opts.save_dir, f'gen_rs.mp4'),
             fps=opts.fps,
         )
 
-        viz = True
-        if viz:
-            tensor_left = frames[0].to(opts.device)
-            tensor_right = sample[0].to(opts.device)
-            interval = torch.ones(3, opts.video_length, 384, 30).to(opts.device)
-            result = torch.cat((tensor_left, interval, tensor_right), dim=3)
-            result_reverse = torch.flip(result, dims=[1])
-            final_result = torch.cat((result, result_reverse[:, 1:, :, :]), dim=1)
-            save_video(
-                final_result.permute(1, 2, 3, 0),
-                os.path.join(opts.save_dir, 'viz.mp4'),
-                fps=opts.fps * 2,
-            )
+    def infer_droid(self, opts):
+        assert opts.droid_path is not None
+        assert opts.driod_camera is not None
+        driod_camera = json.loads(opts.driod_camera)
+
+        frames_ori = read_video_frames_custom(
+            os.path.join(opts.droid_path, "recordings/MP4", f"{driod_camera['wrist']}.mp4"),
+            opts.video_length,
+            opts.stride,
+        )  # (N, H, W, 3)
+        num_frames, ori_h, ori_w = frames_ori.shape[:3]
+        frames_ori = (torch.from_numpy(frames_ori).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
+                     )  # [N, H, W, 3] -> [N, 3, H, W], [-1,1]
+
+        # self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
+
+    def infer_custom(self, opts):
+        assert opts.images_path is not None
+        assert opts.camera_path is not None
+
+        frames_ori = read_video_frames_custom(
+            opts.video_path,
+            opts.video_length,
+            opts.stride,
+        )  # (N, H, W, 3)
+        num_frames, ori_h, ori_w = frames_ori.shape[:3]
+        frames_ori = (torch.from_numpy(frames_ori).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
+                     )  # [N, H, W, 3] -> [N, 3, H, W], [-1,1]
+
+        vggt_predictions = inference_vggt(opts.images_path)
+        vggt_depth = vggt_predictions['depth'].squeeze().detach().cpu().numpy()  # [N, 518, 518]
+
+        resize = False
+
+        if resize:
+            vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], (ori_h, ori_w))
+        else:
+            vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], (518, 518))
+        vggt_intrinsic = vggt_intrinsic.squeeze(0).detach().cpu()  # [N, 3, 3]
+
+        depths = []
+        K = []
+        if resize:
+            frames_proj = frames_ori.clone()
+        else:
+            frames_proj = vggt_predictions['images'].squeeze(0) * 2 - 1
+        for i in range(vggt_depth.shape[0]):
+            intrin = vggt_intrinsic[i].clone()
+            if resize:
+                depths.append(torch.from_numpy(cv2.resize(vggt_depth[i], (1024, 576), interpolation=cv2.INTER_NEAREST)))
+
+                s_x = ori_w / 518
+                s_y = ori_h / 518
+
+                intrin[0, 0] *= s_x  # fx
+                intrin[1, 1] *= s_y  # fy
+                intrin[0, 2] *= s_x  # cx
+                intrin[1, 2] *= s_y  # cy
+            else:
+                depths.append(torch.from_numpy(vggt_depth[i]))
+
+            K.append(intrin)
+
+        depths = torch.stack(depths).to(opts.device).unsqueeze(1)
+        K = torch.stack(K).to(opts.device)
+
+        with open(opts.camera_path, 'r') as f:
+            cam_data = json.load(f)
+
+        source_cam = torch.tensor(cam_data[opts.images_path.split('/')[-1]], dtype=torch.float32)
+        target_cam = torch.tensor(cam_data[opts.target_camera], dtype=torch.float32)
+
+        vggt_extrinsic = vggt_extrinsic.squeeze(0).detach().cpu()  # [N, 3, 4], w2c
+        vggt_extrinsic = torch.cat(
+            [vggt_extrinsic, torch.tensor([[[0, 0, 0, 1]]]).repeat(num_frames, 1, 1)], dim=1)  # [N, 4, 4]
+        vggt_extrinsic = torch.linalg.inv(vggt_extrinsic)
+        source_cam = source_cam  # [N, 4, 4]
+        target_cam = target_cam  # [N, 4, 4]
+
+        # `\sum_i w_i \|s R x_i + t - y_i\|^2`
+        # s R x + t = y
+        R, t, scale = roma.rigid_points_registration(
+            x=source_cam[:, :3, 3],
+            y=vggt_extrinsic[:, :3, 3],
+            weights=None,
+            compute_scaling=True,
+        )
+
+        R_trans = torch.eye(4)
+        R_trans[:3, :3] = R
+        t_trans = torch.zeros(4)
+        t_trans[:3] = t
+
+        pose_s = torch.eye(4).unsqueeze(0).repeat(num_frames, 1, 1)
+        pose_s[:, :3, :3] = R.unsqueeze(0) @ source_cam[:, :3, :3]
+        pose_s[:, :3, 3] = (scale * R @ source_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
+
+        pose_t = torch.eye(4).unsqueeze(0).repeat(num_frames, 1, 1)
+        pose_t[:, :3, :3] = R.unsqueeze(0) @ target_cam[:, :3, :3]
+        pose_t[:, :3, 3] = (scale * R @ target_cam[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
+
+        pose_s = torch.linalg.inv(pose_s)
+        pose_t = torch.linalg.inv(pose_t)
+
+        self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
 
     def infer_gradual(self, opts):
         frames = read_video_frames(opts.video_path, opts.video_length, opts.stride, opts.max_res)  # (N, 576, 1024, 3)

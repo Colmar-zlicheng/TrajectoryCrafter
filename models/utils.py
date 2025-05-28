@@ -27,6 +27,29 @@ import torch.nn.functional as F
 from decord import VideoReader, cpu
 
 
+def read_image_dir(image_dir):
+    image_file = sorted(os.listdir(image_dir), key=lambda x: int(x.split('.')[0]))
+    return [os.path.join(image_dir, file) for file in image_file]
+
+
+def read_video_frames_custom(video_path, process_length, stride, dataset="open", width=-1, height=-1):
+    if dataset == "open":
+        print("==> processing video: ", video_path)
+        vid = VideoReader(video_path, ctx=cpu(0))
+        print("==> original video shape: ", (len(vid), *vid.get_batch([0]).shape[1:]))
+
+    vid = VideoReader(video_path, ctx=cpu(0), width=width, height=height)
+
+    frames_idx = list(range(0, len(vid), stride))
+    print(f"==> downsampled shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}, with stride: {stride}")
+    if process_length != -1 and process_length < len(frames_idx):
+        frames_idx = frames_idx[:process_length]
+    print(f"==> final processing shape: {len(frames_idx), *vid.get_batch([0]).shape[1:]}")
+    frames = vid.get_batch(frames_idx).asnumpy().astype("float32") / 255.0
+
+    return frames  # (49, 576, 1024, 3)
+
+
 def read_video_frames(video_path, process_length, stride, max_res, dataset="open"):
     if dataset == "open":
         print("==> processing video: ", video_path)
