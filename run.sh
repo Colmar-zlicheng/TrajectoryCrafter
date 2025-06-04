@@ -11,12 +11,13 @@
 
 CUDA_VISIBLE_DEVICES=2 python inference.py \
     --droid_path './data/test_data/Fri_Jul__7_09:42:23_2023' \
-    --driod_camera '{"static": [22008760, 24400334], "wrist": 18026681}'\
-    --stride 1 \
-    --video_length -1 \
+    --driod_camera '{"static": [22008760, 24400334], "wrist": 24400334}'\
+    --stride 3 \
+    --video_length 80 \
     --out_dir experiments \
     --mask \
     --mode 'droid' \
+# 18026681
 
 # # gradual mode
 # python inference.py \
