@@ -209,8 +209,8 @@ class TrajCrafter:
             img_names_select = [img_names[i] for i in frames_idx]
             image_files = [os.path.join(images_path, x) for x in img_names_select]
 
-            source_cam = torch.tensor(static_extr, dtype=torch.float32)
-            target_cam = torch.tensor(wrist_extr, dtype=torch.float32)
+            source_cam = torch.tensor(static_extr, dtype=torch.float32)[frames_idx]
+            target_cam = torch.tensor(wrist_extr, dtype=torch.float32)[frames_idx]
 
             frames_proj, depths, pose_s, pose_t, K = self.infer_vggt(image_files,
                                                                      num_frames,
@@ -230,10 +230,10 @@ class TrajCrafter:
             K = torch.tensor(static_intr["left"]).unsqueeze(0).repeat(num_frames, 1, 1).to(opts.device)
             with open(os.path.join(opts.droid_path, "extract/depth", f"{static_cam}_left.pkl"), 'rb') as f:
                 depths = pickle.load(f)
-            depths = torch.tensor(depths[frames_idx]).to(opts.device).unsqueeze(1)
+            depths = torch.tensor(depths)[frames_idx].to(opts.device).unsqueeze(1)
 
-            pose_s = torch.linalg.inv(torch.tensor(static_extr[frames_idx]).to(opts.device))
-            pose_t = torch.linalg.inv(torch.tensor(wrist_extr[frames_idx]).to(opts.device))
+            pose_s = torch.linalg.inv(torch.tensor(static_extr)[frames_idx].to(opts.device))
+            pose_t = torch.linalg.inv(torch.tensor(wrist_extr)[frames_idx].to(opts.device))
 
         self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w, debug=debug)
 
@@ -324,8 +324,9 @@ class TrajCrafter:
         with open(opts.camera_path, 'r') as f:
             cam_data = json.load(f)
 
-        source_cam = torch.tensor(cam_data[opts.images_path.split('/')[-1]], dtype=torch.float32)  # [N, 4, 4]
-        target_cam = torch.tensor(cam_data[opts.target_camera], dtype=torch.float32)  # [N, 4, 4]
+        source_cam = torch.tensor(cam_data[opts.images_path.split('/')[-1]],
+                                  dtype=torch.float32)[frames_idx]  # [N, 4, 4]
+        target_cam = torch.tensor(cam_data[opts.target_camera], dtype=torch.float32)[frames_idx]  # [N, 4, 4]
 
         img_names = sorted(os.listdir(opts.images_path), key=lambda x: int(x.split('.')[0]))
         img_names_select = [img_names[i] for i in frames_idx]
