@@ -57,7 +57,8 @@ class TrajCrafter:
                            K,
                            ori_h,
                            ori_w,
-                           max_frame_chunk=49):
+                           max_frame_chunk=49,
+                           debug=False):
         num_frames = frames_ori.shape[0]
 
         warped_images = []
@@ -74,6 +75,14 @@ class TrajCrafter:
                 opts.mask,
                 twice=False,
             )
+            if debug:
+                tmp_proj = (warped_frame2.clone().detach().squeeze(0).permute(1, 2, 0).cpu().numpy() + 1) / 2
+                cv2.imwrite('./tmp/proj.png', (tmp_proj * 255).astype(np.uint8))
+                tmp_depth = depths[i].squeeze(0).detach().cpu().unsqueeze(-1).repeat(1, 1, 3).numpy()
+                cv2.imwrite('./tmp/depth.png', (tmp_depth / tmp_depth.max() * 255).astype(np.uint8))
+                tmp_frame = frames_proj[i].detach().cpu().permute(1, 2, 0).numpy()
+                cv2.imwrite('./tmp/frame.png', ((tmp_frame + 1) / 2 * 255).astype(np.uint8))
+
             warped_images.append(warped_frame2)
             masks.append(mask2)
         cond_video = (torch.cat(warped_images) + 1.0) / 2.0
@@ -171,9 +180,11 @@ class TrajCrafter:
             fps=opts.fps,
         )
 
-    def infer_droid(self, opts):
+    def infer_droid(self, opts, debug=True):
         assert opts.droid_path is not None
         assert opts.driod_camera is not None
+        assert opts.stride == 1
+
         driod_camera = json.loads(opts.driod_camera)
 
         frames_ori = read_video_frames_custom(
@@ -181,6 +192,8 @@ class TrajCrafter:
             opts.video_length,
             opts.stride,
         )  # (N, H, W, 3)
+        frames_ori = frames_ori[..., ::-1].copy()  # BGR to RGB
+
         num_frames, ori_h, ori_w = frames_ori.shape[:3]
         frames_ori = (torch.from_numpy(frames_ori).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
                      )  # [N, H, W, 3] -> [N, 3, H, W], [-1, 1]
@@ -202,11 +215,12 @@ class TrajCrafter:
         pose_s = torch.linalg.inv(torch.tensor(static_extr[:num_frames]).to(opts.device))
         pose_t = torch.linalg.inv(torch.tensor(wrist_extr[:num_frames]).to(opts.device))
 
-        self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
+        self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w, debug=debug)
 
     def infer_custom(self, opts):
         assert opts.images_path is not None
         assert opts.camera_path is not None
+        assert opts.stride == 1
 
         frames_ori = read_video_frames_custom(
             opts.video_path,
