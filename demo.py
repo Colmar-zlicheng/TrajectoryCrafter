@@ -57,6 +57,7 @@ class TrajCrafter:
                            K,
                            ori_h,
                            ori_w,
+                           K_t=None,
                            max_frame_chunk=49,
                            debug=False):
         num_frames = frames_ori.shape[0]
@@ -71,17 +72,17 @@ class TrajCrafter:
                 pose_s[i:i + 1],
                 pose_t[i:i + 1],
                 K[i:i + 1],
-                None,
+                None if K_t is None else K_t[i:i + 1],
                 opts.mask,
                 twice=False,
             )
             if debug:
                 tmp_proj = (warped_frame2.clone().detach().squeeze(0).permute(1, 2, 0).cpu().numpy() + 1) / 2
-                cv2.imwrite('./tmp/proj.png', (tmp_proj * 255).astype(np.uint8))
+                cv2.imwrite('./tmp/proj.png', (tmp_proj[..., ::-1] * 255).astype(np.uint8))
                 tmp_depth = depths[i].squeeze(0).detach().cpu().unsqueeze(-1).repeat(1, 1, 3).numpy()
-                cv2.imwrite('./tmp/depth.png', (tmp_depth / tmp_depth.max() * 255).astype(np.uint8))
+                cv2.imwrite('./tmp/depth.png', (tmp_depth[..., ::-1] / tmp_depth.max() * 255).astype(np.uint8))
                 tmp_frame = frames_proj[i].detach().cpu().permute(1, 2, 0).numpy()
-                cv2.imwrite('./tmp/frame.png', ((tmp_frame + 1) / 2 * 255).astype(np.uint8))
+                cv2.imwrite('./tmp/frame.png', ((tmp_frame[..., ::-1] + 1) / 2 * 255).astype(np.uint8))
 
             warped_images.append(warped_frame2)
             masks.append(mask2)
@@ -180,28 +181,102 @@ class TrajCrafter:
             fps=opts.fps,
         )
 
+    def infer_custom(self, opts, use_vggt=False, debug=True):
+        assert opts.custom_path is not None
+
+        image_dir = os.path.join(opts.custom_path, 'color')
+        depth_dir = os.path.join(opts.custom_path, 'depth')
+        src_cam_dir = os.path.join(opts.custom_path, 'camera')
+        tgt_cam_dir = os.path.join(opts.custom_path, 'camera_shift')
+        image_files = sorted(os.listdir(image_dir))
+        depth_files = sorted(os.listdir(depth_dir))
+        src_cam_files = sorted(os.listdir(src_cam_dir))
+        tgt_cam_files = sorted(os.listdir(tgt_cam_dir))
+
+        frames_idx = list(range(0, len(image_files), opts.stride))
+        if opts.video_length != -1 and opts.video_length < len(frames_idx):
+            frames_idx = frames_idx[:opts.video_length]
+
+        frames_ori = []
+        depths = []
+        pose_s = []
+        pose_t = []
+        K = []
+        K_t = []
+
+        for i in tqdm(frames_idx):
+            image = cv2.imread(os.path.join(image_dir, image_files[i]))
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            image = torch.tensor(image, dtype=torch.float32) / 255.0
+
+            src_cam = np.load(os.path.join(src_cam_dir, src_cam_files[i]))
+            tgt_cam = np.load(os.path.join(tgt_cam_dir, tgt_cam_files[i]))
+
+            frames_ori.append(image)
+            depths.append(torch.from_numpy(np.load(os.path.join(depth_dir, depth_files[i]))))
+            pose_s.append(torch.from_numpy(src_cam['pose']))
+            pose_t.append(torch.from_numpy(tgt_cam['pose']))
+            K.append(torch.from_numpy(src_cam['intrinsics']))
+            K_t.append(torch.from_numpy(tgt_cam['intrinsics']))
+
+        frames_ori = torch.stack(frames_ori, dim=0).to(opts.device)
+        depths = torch.stack(depths, dim=0).to(opts.device)
+        pose_s = torch.stack(pose_s, dim=0).to(opts.device)
+        pose_t = torch.stack(pose_t, dim=0).to(opts.device)
+        K = torch.stack(K, dim=0).to(opts.device)
+        K_t = torch.stack(K_t, dim=0).to(opts.device)
+
+        depths = depths.unsqueeze(1)
+        pose_s = torch.linalg.inv(pose_s)
+        pose_t = torch.linalg.inv(pose_t)
+
+        num_frames, ori_h, ori_w = frames_ori.shape[:3]
+        frames_ori = (frames_ori.permute(0, 3, 1, 2) * 2.0 - 1.0)
+        frames_proj = frames_ori.clone()
+
+        self.infer_diff_inpaint(
+            opts,
+            frames_ori,  # [N, 3, H, W], [-1, 1]
+            frames_proj,  # [N, 3, H, W], [-1, 1]
+            depths,  # [N, 1, H, W]
+            pose_s,  # [N, 4, 4] w2c
+            pose_t,  # [N, 4, 4] w2c
+            K,  # [N, 3, 3]
+            ori_h,  # int
+            ori_w,  # int
+            K_t,  # [N, 3, 3]
+            debug=debug,  # bool
+        )
+
     def infer_droid(self, opts, use_vggt=True, debug=True):
         assert opts.droid_path is not None
         assert opts.driod_camera is not None
 
         driod_camera = json.loads(opts.driod_camera)
 
+        static_cam = driod_camera['static'][0]
+        other_static_cam = driod_camera['static'][1]
+        wrist_cam = driod_camera['wrist']
+
         frames_ori, frames_idx = read_video_frames_custom(
-            os.path.join(opts.droid_path, "recordings/MP4", f"{driod_camera['wrist']}.mp4"),
+            os.path.join(opts.droid_path, "recordings/MP4", f"{static_cam}.mp4"),
             opts.video_length,
             opts.stride,
         )  # (N, H, W, 3)
-        frames_ori = frames_ori[..., ::-1].copy()  # BGR to RGB
 
         num_frames, ori_h, ori_w = frames_ori.shape[:3]
         frames_ori = (torch.from_numpy(frames_ori).permute(0, 3, 1, 2).to(opts.device) * 2.0 - 1.0
                      )  # [N, H, W, 3] -> [N, 3, H, W], [-1, 1]
 
-        static_cam = driod_camera['static'][0]
         with open(os.path.join(opts.droid_path, "extract/camera", f"{static_cam}_extr_left.json"), 'r') as f:
             static_extr = json.load(f)
-        with open(os.path.join(opts.droid_path, "extract/camera", f"{driod_camera['wrist']}_extr_left.json"), 'r') as f:
+        with open(os.path.join(opts.droid_path, "extract/camera", f"{other_static_cam}_extr_left.json"), 'r') as f:
+            other_static_extr = json.load(f)
+        with open(os.path.join(opts.droid_path, "extract/camera", f"{wrist_cam}_extr_left.json"), 'r') as f:
             wrist_extr = json.load(f)
+        static_extr = torch.tensor(static_extr, dtype=torch.float32)[frames_idx]
+        other_static_extr = torch.tensor(other_static_extr, dtype=torch.float32)[frames_idx]
+        wrist_extr = torch.tensor(wrist_extr, dtype=torch.float32)[frames_idx]
 
         if use_vggt:
             images_path = os.path.join(opts.droid_path, f"recordings/JPG/{static_cam}")
@@ -209,77 +284,122 @@ class TrajCrafter:
             img_names_select = [img_names[i] for i in frames_idx]
             image_files = [os.path.join(images_path, x) for x in img_names_select]
 
-            source_cam = torch.tensor(static_extr, dtype=torch.float32)[frames_idx]
-            target_cam = torch.tensor(wrist_extr, dtype=torch.float32)[frames_idx]
+            image_files = [os.path.join(opts.droid_path, f"recordings/JPG/{other_static_cam}", "0000.jpg")
+                          ] + image_files
 
-            frames_proj, depths, pose_s, pose_t, K = self.infer_vggt(image_files,
-                                                                     num_frames,
-                                                                     frames_ori,
-                                                                     source_cam,
-                                                                     target_cam,
-                                                                     ori_h,
-                                                                     ori_w,
-                                                                     opts.device,
-                                                                     resize=False)
+            frames_proj, depths, K, vggt_extrinsic = self.infer_vggt(
+                image_files=image_files,
+                frames_ori=frames_ori,
+                ori_h=ori_h,
+                ori_w=ori_w,
+                device=opts.device,
+                resize=False,
+                early_return=True,
+            )
+            frames_proj = frames_proj[1:]
+            depths = depths[1:]
+            K = K[1:]
+
+            K_t = None
+
+            R, t, scale = roma.rigid_points_registration(
+                x=torch.stack([other_static_extr[0, :3, 3], static_extr[0, :3, 3]], dim=0),
+                y=vggt_extrinsic[:2, :3, 3],
+                weights=None,
+                compute_scaling=True,
+            )
+
+            pose_s = torch.eye(4).unsqueeze(0).repeat(num_frames, 1, 1)
+            pose_s[:, :3, :3] = R.unsqueeze(0) @ static_extr[:, :3, :3]
+            pose_s[:, :3, 3] = (scale * R @ static_extr[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
+
+            pose_t = torch.eye(4).unsqueeze(0).repeat(num_frames, 1, 1)
+            pose_t[:, :3, :3] = R.unsqueeze(0) @ wrist_extr[:, :3, :3]
+            pose_t[:, :3, 3] = (scale * R @ wrist_extr[:, :3, 3].transpose(0, 1)).transpose(0, 1) + t
+
+            pose_s = torch.linalg.inv(pose_s)  # w2c
+            pose_t = torch.linalg.inv(pose_t)
 
         else:
             frames_proj = frames_ori.clone()
 
             with open(os.path.join(opts.droid_path, "extract/camera", f"{static_cam}_intr.json"), 'r') as f:
                 static_intr = json.load(f)
+            with open(os.path.join(opts.droid_path, "extract/camera", f"{wrist_cam}_intr.json"), 'r') as f:
+                wrist_intr = json.load(f)
             K = torch.tensor(static_intr["left"]).unsqueeze(0).repeat(num_frames, 1, 1).to(opts.device)
+            K_t = torch.tensor(wrist_intr["left"]).unsqueeze(0).repeat(num_frames, 1, 1).to(opts.device)
             with open(os.path.join(opts.droid_path, "extract/depth", f"{static_cam}_left.pkl"), 'rb') as f:
                 depths = pickle.load(f)
             depths = torch.tensor(depths)[frames_idx].to(opts.device).unsqueeze(1)
 
-            pose_s = torch.linalg.inv(torch.tensor(static_extr)[frames_idx].to(opts.device))
-            pose_t = torch.linalg.inv(torch.tensor(wrist_extr)[frames_idx].to(opts.device))
+            pose_s = torch.linalg.inv(static_extr).to(opts.device)
+            pose_t = torch.linalg.inv(wrist_extr).to(opts.device)
 
-        self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w, debug=debug)
+        self.infer_diff_inpaint(opts,
+                                frames_ori,
+                                frames_proj,
+                                depths,
+                                pose_s,
+                                pose_t,
+                                K,
+                                ori_h,
+                                ori_w,
+                                K_t,
+                                debug=debug)
 
-    def infer_vggt(self,
-                   image_files,
-                   num_frames,
-                   frames_ori,
-                   source_cam,
-                   target_cam,
-                   ori_h,
-                   ori_w,
-                   device,
-                   resize=False):
+    def infer_vggt(
+        self,
+        image_files,
+        num_frames=None,
+        frames_ori=None,
+        source_cam=None,
+        target_cam=None,
+        ori_h=None,
+        ori_w=None,
+        device=None,
+        resize=False,
+        early_return=False,
+    ):
         vggt_predictions = inference_vggt(image_files)
-        vggt_depth = vggt_predictions['depth'].squeeze().detach().cpu().numpy()  # [N, 518, 518]
-        assert vggt_depth.shape[0] == num_frames
 
-        resize = False
+        cam_size = (ori_h, ori_w) if resize else (518, 518)
+        vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], cam_size)
 
         if resize:
-            vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], (ori_h, ori_w))
+            assert frames_ori is not None
             frames_proj = frames_ori.clone()
         else:
-            vggt_extrinsic, vggt_intrinsic = pose_encoding_to_extri_intri(vggt_predictions['pose_enc'], (518, 518))
             frames_proj = vggt_predictions['images'].squeeze(0) * 2 - 1
+
         vggt_intrinsic = vggt_intrinsic.squeeze(0).detach().cpu()  # [N, 3, 3]
+        K = vggt_intrinsic.clone().to(device)
+
+        vggt_depth = vggt_predictions['depth'].squeeze().detach().cpu().numpy()  # [N, 518, 518]
 
         depths = []
-        K = []
         for i in range(vggt_depth.shape[0]):
-            intrin = vggt_intrinsic[i].clone()
             if resize:
                 depths.append(
                     torch.from_numpy(cv2.resize(vggt_depth[i], (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)))
             else:
                 depths.append(torch.from_numpy(vggt_depth[i]))
-
-            K.append(intrin)
-
         depths = torch.stack(depths).to(device).unsqueeze(1)
-        K = torch.stack(K).to(device)
 
         vggt_extrinsic = vggt_extrinsic.squeeze(0).detach().cpu()  # [N, 3, 4], w2c
         vggt_extrinsic = torch.cat(
-            [vggt_extrinsic, torch.tensor([[[0, 0, 0, 1]]]).repeat(num_frames, 1, 1)], dim=1)  # [N, 4, 4]
+            [vggt_extrinsic, torch.tensor([[[0, 0, 0, 1]]]).repeat(vggt_extrinsic.shape[0], 1, 1)], dim=1)  # [N, 4, 4]
         vggt_extrinsic = torch.linalg.inv(vggt_extrinsic)
+
+        if early_return:
+            return frames_proj, depths, K, vggt_extrinsic
+        else:
+            assert num_frames is not None
+            assert source_cam is not None
+            assert target_cam is not None
+            assert vggt_depth.shape[0] == num_frames
+            assert source_cam.shape[0] == num_frames
+            assert target_cam.shape[0] == num_frames
 
         # `\sum_i w_i \|s R x_i + t - y_i\|^2`
         # s R x + t = y
@@ -289,11 +409,6 @@ class TrajCrafter:
             weights=None,
             compute_scaling=True,
         )
-
-        R_trans = torch.eye(4)
-        R_trans[:3, :3] = R
-        t_trans = torch.zeros(4)
-        t_trans[:3] = t
 
         pose_s = torch.eye(4).unsqueeze(0).repeat(num_frames, 1, 1)
         pose_s[:, :3, :3] = R.unsqueeze(0) @ source_cam[:, :3, :3]
@@ -308,7 +423,7 @@ class TrajCrafter:
 
         return frames_proj, depths, pose_s, pose_t, K
 
-    def infer_custom(self, opts):
+    def infer_recammaster(self, opts):
         assert opts.images_path is not None
         assert opts.camera_path is not None
 
@@ -332,15 +447,17 @@ class TrajCrafter:
         img_names_select = [img_names[i] for i in frames_idx]
         image_files = [os.path.join(opts.images_path, x) for x in img_names_select]
 
-        frames_proj, depths, pose_s, pose_t, K = self.infer_vggt(image_files,
-                                                                 num_frames,
-                                                                 frames_ori,
-                                                                 source_cam,
-                                                                 target_cam,
-                                                                 ori_h,
-                                                                 ori_w,
-                                                                 opts.device,
-                                                                 resize=False)
+        frames_proj, depths, pose_s, pose_t, K = self.infer_vggt(
+            image_files=image_files,
+            num_frames=num_frames,
+            frames_ori=frames_ori,
+            source_cam=source_cam,  # c2w
+            target_cam=target_cam,
+            ori_h=ori_h,
+            ori_w=ori_w,
+            device=opts.device,
+            resize=False,
+        )
 
         self.infer_diff_inpaint(opts, frames_ori, frames_proj, depths, pose_s, pose_t, K, ori_h, ori_w)
 

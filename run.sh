@@ -1,3 +1,21 @@
+CUDA_VISIBLE_DEVICES=2 python inference.py \
+    --custom_path './data/test_data/dog_cup/cut3r' \
+    --stride 1 \
+    --video_length -1 \
+    --out_dir experiments \
+    --mask \
+    --mode 'custom' \
+
+# CUDA_VISIBLE_DEVICES=2 python inference.py \
+#     --droid_path './data/test_data/Fri_Jul__7_09:42:23_2023' \
+#     --driod_camera '{"static": [22008760, 24400334], "wrist": 24400334}'\
+#     --stride 3 \
+#     --video_length 60 \
+#     --out_dir experiments \
+#     --mask \
+#     --mode 'droid' \
+# # 18026681
+
 # CUDA_VISIBLE_DEVICES=0 python inference.py \
 #     --video_path './data/test_data/scene15/videos/cam03.mp4' \
 #     --images_path './data/test_data/scene15/images/cam03' \
@@ -7,17 +25,7 @@
 #     --video_length -1 \
 #     --out_dir experiments \
 #     --mask \
-#     --mode 'custom' \
-
-CUDA_VISIBLE_DEVICES=2 python inference.py \
-    --droid_path './data/test_data/Fri_Jul__7_09:42:23_2023' \
-    --driod_camera '{"static": [22008760, 24400334], "wrist": 24400334}'\
-    --stride 3 \
-    --video_length 80 \
-    --out_dir experiments \
-    --mask \
-    --mode 'droid' \
-# 18026681
+#     --mode 'recammaster' \
 
 # # gradual mode
 # python inference.py \

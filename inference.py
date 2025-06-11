@@ -10,11 +10,15 @@ def get_parser():
 
     ## general
     parser.add_argument('--video_path', type=str, default=None, help='Input path')
+    parser.add_argument('--custom_path', type=str, default=None)
+
     parser.add_argument('--images_path', type=str, default=None)
     parser.add_argument('--camera_path', type=str, default=None)
     parser.add_argument('--target_camera', type=str, default=None)
+
     parser.add_argument('--droid_path', type=str, default=None)
     parser.add_argument('--driod_camera', type=str, default=None)
+
     parser.add_argument('--out_dir', type=str, default='./experiments/', help='Output dir')
     parser.add_argument('--device', type=str, default='cuda:0', help='The device to use')
     parser.add_argument(
@@ -159,6 +163,8 @@ if __name__ == "__main__":
             opts.exp_name = (f'{prefix}_{os.path.splitext(os.path.basename(opts.video_path))[0]}')
         elif opts.droid_path is not None:
             opts.exp_name = (f'{prefix}_{os.path.splitext(os.path.basename(opts.droid_path))}')
+        elif opts.custom_path is not None:
+            opts.exp_name = (f'{prefix}_{opts.custom_path.split("/")[-2]}')
         else:
             raise ValueError
     opts.save_dir = os.path.join(opts.out_dir, opts.exp_name)
@@ -176,3 +182,5 @@ if __name__ == "__main__":
         pvd.infer_custom(opts)
     elif opts.mode == 'droid':
         pvd.infer_droid(opts)
+    elif opts.mode == 'recammaster':
+        pvd.infer_recammaster(opts)
